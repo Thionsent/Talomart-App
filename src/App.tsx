@@ -30,7 +30,14 @@ export default function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [wishlist, setWishlist] = useState<string[]>([]);
+  const [wishlist, setWishlist] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("talomart_wishlist");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [browsingHistory, setBrowsingHistory] = useState<string[]>([]);
 
   // User details
@@ -39,6 +46,7 @@ export default function App() {
   const [userName, setUserName] = useState("Edward Nganga");
   const [loyaltyProfile, setLoyaltyProfile] = useState<LoyaltyProfile | null>(null);
   const [couponApplied, setCouponApplied] = useState<{ code: string; discount: number } | null>(null);
+  const [referrerEmail, setReferrerEmail] = useState<string>("");
 
   // Layout states
   const [activeTab, setActiveTab] = useState<"store" | "cart" | "wishlist" | "loyalty" | "dashboard">("store");
@@ -71,7 +79,38 @@ export default function App() {
     loadData();
     // Pre-populate loyalty account signup reward immediately
     fetchLoyaltyProfile("ngangaedward261@gmail.com");
+
+    // Check shareable wishlist and referral query parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const sharedWishlist = urlParams.get("wishlist");
+    const referralCode = urlParams.get("ref");
+
+    if (referralCode) {
+      setReferrerEmail(referralCode);
+      showNotification(`Referral code loaded! Referrer: ${referralCode}. They will receive 150 points when you map your first completed checkout!`, true);
+    }
+
+    if (sharedWishlist) {
+      const ids = sharedWishlist.split(",").filter(Boolean);
+      if (ids.length > 0) {
+        setWishlist((prev) => {
+          const merged = Array.from(new Set([...prev, ...ids]));
+          return merged;
+        });
+        showNotification(`Loaded ${ids.length} shared wishlist products!`, true);
+        // Clean URL parameter safely (except ?ref if we want to preserve it, though preserving state is enough)
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("talomart_wishlist", JSON.stringify(wishlist));
+    } catch (e) {
+      console.error(e);
+    }
+  }, [wishlist]);
 
   const fetchLoyaltyProfile = async (email: string) => {
     try {
@@ -253,6 +292,35 @@ export default function App() {
     setActiveTab("dashboard"); // Settle onto dashboard to trace the telemetry status!
   };
 
+  const handleReorder = (orderItems: { productId: string; productName: string; price: number; quantity: number }[]) => {
+    let addedAny = false;
+    orderItems.forEach((item) => {
+      const prod = products.find((p) => p.id === item.productId);
+      if (prod && prod.stock > 0) {
+        setCart((prevCart) => {
+          const target = prevCart.find((it) => it.product.id === prod.id);
+          if (target) {
+            const finalQty = Math.min(prod.stock, target.quantity + item.quantity);
+            return prevCart.map((it) =>
+              it.product.id === prod.id ? { ...it, quantity: finalQty } : it
+            );
+          } else {
+            const finalQty = Math.min(prod.stock, item.quantity);
+            return [...prevCart, { product: prod, quantity: finalQty }];
+          }
+        });
+        addedAny = true;
+      }
+    });
+
+    if (addedAny) {
+      showNotification("The past order's items have been loaded to your cart! Ready for checkout.", true);
+      setActiveTab("cart");
+    } else {
+      showNotification("Sorry, all items in this order are out of stock.", false);
+    }
+  };
+
   const cartSubtotal = cart.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
   const cartItemsCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -332,7 +400,7 @@ export default function App() {
               }`}
             >
               <Award className="h-4.5 w-4.5 text-amber-500" />
-              Club Loyalty
+              Account & Loyalty
               {loyaltyProfile && (
                 <span className="bg-amber-100 border border-amber-200 text-amber-800 rounded px-1.5 py-0.2 text-[9px]">
                   {loyaltyProfile.points} PTS
@@ -409,7 +477,7 @@ export default function App() {
               onClick={() => { setActiveTab("loyalty"); setMobileMenuOpen(false); }}
               className="w-full text-left py-2 px-3 hover:bg-gray-50 rounded flex justify-between"
             >
-              <span>Club Loyalty</span>
+              <span>Account & Loyalty</span>
               {loyaltyProfile && <span className="text-amber-600">{loyaltyProfile.points} PTS</span>}
             </button>
             <div className="pt-2 border-t">
@@ -479,10 +547,20 @@ export default function App() {
           <LoyaltySection
             userEmail={userEmail}
             setUserEmail={setUserEmail}
+            userName={userName}
+            setUserName={setUserName}
+            userPhone={userPhone}
+            setUserPhone={setUserPhone}
             loyaltyProfile={loyaltyProfile}
             setLoyaltyProfile={setLoyaltyProfile}
             onApplyCoupon={(code, val) => setCouponApplied({ code, discount: val })}
             couponApplied={couponApplied}
+            orders={orders}
+            products={products}
+            onAddToCart={handleAddToCart}
+            onNavigateToTab={setActiveTab}
+            wishlist={wishlist}
+            onReorder={handleReorder}
           />
         )}
 
@@ -537,6 +615,7 @@ export default function App() {
           couponApplied={couponApplied}
           onOrderCompleted={handleOrderCompleted}
           subtotal={cartSubtotal}
+          referrerEmail={referrerEmail}
         />
       )}
     </div>

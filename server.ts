@@ -488,6 +488,8 @@ app.post("/api/orders", (req: Request, res: Response) => {
   const finalFee = Number(deliveryFee || 0);
   const finalAmount = Math.max(0, totalAmount + finalFee - finalDiscount);
 
+  const referrerEmail = req.body.referrerEmail;
+
   // Card secure last 4
   let cardLast4: string | undefined;
   if (paymentMethod === "card" && cardDetails?.cardNumber) {
@@ -536,6 +538,28 @@ app.post("/api/orders", (req: Request, res: Response) => {
       reason: `Order ${newOrder.id} reward payout`,
       date: new Date().toISOString()
     });
+  }
+
+  // referral credit processing
+  if (referrerEmail && typeof referrerEmail === "string") {
+    const refLower = referrerEmail.toLowerCase().trim();
+    if (refLower !== emailLower) {
+      if (!loyaltyProfiles[refLower]) {
+        loyaltyProfiles[refLower] = {
+          points: 100, // Referrer welcome
+          tier: "Bronze",
+          userEmail: refLower,
+          history: [{ pointsAdded: 100, reason: "Welcome Reward Signup Bonus", date: new Date().toISOString() }]
+        };
+      }
+      loyaltyProfiles[refLower].points += 150;
+      loyaltyProfiles[refLower].history.unshift({
+        pointsAdded: 150,
+        reason: `Referral milestone payout: Invited ${customerEmail}`,
+        date: new Date().toISOString()
+      });
+      loyaltyProfiles[refLower].tier = refreshLoyaltyTier(loyaltyProfiles[refLower].points);
+    }
   }
 
   // refresh tier

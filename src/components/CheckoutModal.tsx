@@ -12,6 +12,7 @@ interface CheckoutModalProps {
   couponApplied: { code: string; discount: number } | null;
   onOrderCompleted: (orderData: any) => void;
   subtotal: number;
+  referrerEmail?: string;
 }
 
 export default function CheckoutModal({
@@ -23,7 +24,8 @@ export default function CheckoutModal({
   userName,
   couponApplied,
   onOrderCompleted,
-  subtotal
+  subtotal,
+  referrerEmail
 }: CheckoutModalProps) {
   const [step, setStep] = useState<1 | 2>(1);
 
@@ -100,7 +102,8 @@ export default function CheckoutModal({
           cardDetails: paymentMethod === "card" ? { cardNumber, cardHolder } : null,
           mobileMoneyNumber: paymentMethod === "mobile-money" ? `${mobileOperator.toUpperCase()} - ${mobileMoneyNumber}` : null,
           discountApplied: discountAmount,
-          deliveryFee
+          deliveryFee,
+          referrerEmail
         })
       });
 

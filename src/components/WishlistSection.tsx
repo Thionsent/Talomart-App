@@ -1,6 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
 import { Product } from "../types";
-import { Heart, Trash2, ShoppingCart, ArrowLeft, Headphones } from "lucide-react";
+import { Heart, Trash2, ShoppingCart, ArrowLeft, Headphones, Share2, Check } from "lucide-react";
 
 interface WishlistSectionProps {
   wishlist: string[];
@@ -17,8 +17,19 @@ export default function WishlistSection({
   onAddToCart,
   onNavigateToTab
 }: WishlistSectionProps) {
+  const [copied, setCopied] = useState(false);
 
   const wishlistProducts = products.filter((p) => wishlist.includes(p.id));
+
+  const handleShareWishlist = () => {
+    const shareUrl = `${window.location.origin}${window.location.pathname}?wishlist=${wishlist.join(",")}`;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 3000);
+    }).catch((err) => {
+      console.error("Could not copy link: ", err);
+    });
+  };
 
   if (wishlistProducts.length === 0) {
     return (
@@ -42,10 +53,32 @@ export default function WishlistSection({
 
   return (
     <div className="max-w-4xl mx-auto my-6" id="wishlist-workspace">
-      <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-1.5">
-        <Heart className="h-5 w-5 text-rose-550 fill-current" />
-        Saved Accessories Wishlist ({wishlistProducts.length})
-      </h3>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 pb-3 border-b border-gray-100">
+        <h3 className="text-lg font-bold text-gray-900 flex items-center gap-1.5">
+          <Heart className="h-5 w-5 text-rose-550 fill-current" />
+          Saved Accessories Wishlist ({wishlistProducts.length})
+        </h3>
+        <button
+          onClick={handleShareWishlist}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+            copied
+              ? "bg-emerald-50 text-emerald-800 border-emerald-250"
+              : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-350"
+          }`}
+        >
+          {copied ? (
+            <>
+              <Check className="h-3.5 w-3.5 text-emerald-650" />
+              Wishlist Link Copied!
+            </>
+          ) : (
+            <>
+              <Share2 className="h-3.5 w-3.5 text-indigo-500" />
+              Share Wishlist with Friends
+            </>
+          )}
+        </button>
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {wishlistProducts.map((p) => {
