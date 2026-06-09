@@ -1,0 +1,6 @@
+{
+  "name": "Talomart Stores",
+  "description": "An premium e-commerce platform for Talomart stores, featuring phone accessories, secure mock gateway checkout, real-time-synced inventory tracking, user reviews, wishlists, loyalty reward points, and Gemini-powered personalized recommendations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
