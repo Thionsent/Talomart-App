@@ -1,0 +1,75 @@
+@import "tailwindcss";
+@import "../../../../styles.css";
+@source "../../../../packages/ui/src";
+
+:root {
+  --color-green: #11a245;
+  --color-green-dark: #087f34;
+  --color-navy: #071b42;
+  --color-orange: #ff771f;
+  --color-cream: #f4f7f4;
+  --color-muted: #667085;
+  --font-brand: var(--font-manrope);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: white;
+  color: var(--color-navy);
+  font-family: var(--font-dm-sans), sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.font-brand {
+  font-family: var(--font-manrope), sans-serif;
+}
+
+.page-shell {
+  width: min(1180px, calc(100% - 2rem));
+  margin-inline: auto;
+}
+
+.hero-grid {
+  background-image:
+    radial-gradient(rgba(17, 162, 69, 0.13) 1px, transparent 1px),
+    linear-gradient(120deg, #eaf7ef 0%, #f8fbf8 62%, #dcefe1 100%);
+  background-position: 0 0;
+  background-size: 18px 18px, auto;
+}
+
+button.product-image {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  text-align: inherit;
+}
+
+button.overlay {
+  border: 0;
+  padding: 0;
+}
+
+.modal-close svg {
+  width: 17px;
+  height: 17px;
+}
+
+@media (max-width: 720px) {
+  .page-shell {
+    width: min(100% - 1.25rem, 1180px);
+  }
+}

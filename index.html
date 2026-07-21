@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#071b42">
+  <title>Talomart Stores — Tech that keeps you connected</title>
+  <meta name="description" content="Shop genuine phones, audio, charging, storage and smart accessories from Talomart Stores.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="announcement">
+    <div class="container announcement-inner">
+      <p><span class="pulse"></span> Free delivery on orders over KSh 5,000</p>
+      <div class="announcement-links">
+        <a href="#help">Help Center</a>
+        <a href="#track">Track Order</a>
+        <a href="#sell">Buy on Talomart</a>
+      </div>
+    </div>
+  </div>
+
+  <header class="site-header">
+    <div class="container header-main">
+      <a class="brand" href="#" aria-label="Talomart Stores home">
+        <span class="brand-mark"><span></span></span>
+        <span class="brand-name">Talo<span>mart</span><small>STORES</small></span>
+      </a>
+
+      <form class="search" id="search-form" role="search">
+        <svg aria-hidden="true"><use href="#icon-search"></use></svg>
+        <input id="search-input" type="search" placeholder="What are you looking for today?" aria-label="Search products">
+        <button type="submit">Search</button>
+      </form>
+
+      <div class="header-actions">
+        <button class="header-action" id="account-button" aria-label="Account">
+          <span class="action-icon"><svg><use href="#icon-user"></use></svg></span>
+          <span><small>Hello, sign in</small><strong>My Account</strong></span>
+        </button>
+        <button class="header-action wishlist-header" aria-label="Wishlist">
+          <span class="action-icon"><svg><use href="#icon-heart"></use></svg><b id="wish-count">0</b></span>
+          <span><small>Your saved</small><strong>Wishlist</strong></span>
+        </button>
+        <button class="cart-button" id="cart-button" aria-label="Shopping cart">
+          <svg><use href="#icon-bag"></use></svg>
+          <span><small>My cart</small><strong>KSh <span id="cart-total">0</span></strong></span>
+          <b id="cart-count">0</b>
+        </button>
+        <button class="mobile-menu" id="mobile-menu" aria-label="Open menu">
+          <svg><use href="#icon-menu"></use></svg>
+        </button>
+      </div>
+    </div>
+
+    <nav class="category-nav" id="category-nav">
+      <div class="container nav-inner">
+        <button class="departments">
+          <svg><use href="#icon-grid"></use></svg>
+          All Categories
+          <svg class="chevron"><use href="#icon-chevron-down"></use></svg>
+        </button>
+        <div class="nav-links">
+          <button data-filter="Phones">Phones</button>
+          <button data-filter="Audio">Audio</button>
+          <button data-filter="Charging">Chargers & Power</button>
+          <button data-filter="Storage">Storage</button>
+          <button data-filter="Cameras">Cameras</button>
+          <button data-filter="Accessories">Accessories</button>
+          <button class="deals-link" data-filter="all"><svg><use href="#icon-flame"></use></svg> Today's Deals</button>
+        </div>
+        <a class="support-line" href="tel:+254700000000">
+          <svg><use href="#icon-headphones"></use></svg>
+          <span><small>Need help?</small><strong>+254 700 000 000</strong></span>
+        </a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container hero-grid">
+        <article class="hero-main">
+          <div class="hero-copy">
+            <span class="eyebrow">SMART TECH. SMARTER PRICES.</span>
+            <h1>Power up your <em>everyday.</em></h1>
+            <p>Genuine phones and accessories, picked for performance and priced for real life.</p>
+            <div class="hero-cta">
+              <button class="primary-button" data-scroll-products>Shop latest tech <svg><use href="#icon-arrow"></use></svg></button>
+              <button class="text-button" data-scroll-categories>Explore categories</button>
+            </div>
+            <div class="trust-row">
+              <span><svg><use href="#icon-shield"></use></svg> Genuine products</span>
+              <span><svg><use href="#icon-delivery"></use></svg> Fast delivery</span>
+            </div>
+          </div>
+          <div class="hero-visual">
+            <div class="orbit orbit-one"></div>
+            <div class="orbit orbit-two"></div>
+            <div class="hero-glow"></div>
+            <img src="https://images.unsplash.com/photo-1598327105666-5b89351aff97?auto=format&fit=crop&w=750&q=90" alt="Modern smartphone" fetchpriority="high">
+            <div class="floating-card fc-one">
+              <span class="float-icon"><svg><use href="#icon-zap"></use></svg></span>
+              <span><small>Fast charge</small><strong>65W power</strong></span>
+            </div>
+            <div class="floating-card fc-two">
+              <span class="float-icon green"><svg><use href="#icon-check"></use></svg></span>
+              <span><small>Quality checked</small><strong>1-year warranty</strong></span>
+            </div>
+          </div>
+        </article>
+
+        <aside class="hero-side">
+          <article class="mini-banner audio-banner">
+            <div>
+              <span class="mini-label">PURE SOUND</span>
+              <h3>Hear every detail.</h3>
+              <p>Up to <strong>35% off</strong> audio</p>
+              <button data-filter-jump="Audio">Shop audio <svg><use href="#icon-arrow"></use></svg></button>
+            </div>
+            <img src="https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=500&q=85" alt="Wireless headphones">
+          </article>
+          <article class="mini-banner power-banner">
+            <div>
+              <span class="mini-label">STAY CHARGED</span>
+              <h3>Power that travels.</h3>
+              <p>From <strong>KSh 1,299</strong></p>
+              <button data-filter-jump="Charging">Shop power <svg><use href="#icon-arrow"></use></svg></button>
+            </div>
+            <div class="powerbank-art">
+              <span class="cable"></span><span class="power-body">100<span>%</span></span>
+            </div>
+          </article>
+        </aside>
+      </div>
+    </section>
+
+    <section class="benefits">
+      <div class="container benefits-grid">
+        <div><span><svg><use href="#icon-delivery"></use></svg></span><p><strong>Countrywide delivery</strong><small>Fast, tracked & reliable</small></p></div>
+        <div><span><svg><use href="#icon-shield"></use></svg></span><p><strong>Genuine guarantee</strong><small>Verified quality products</small></p></div>
+        <div><span><svg><use href="#icon-refresh"></use></svg></span><p><strong>Easy returns</strong><small>7-day return policy</small></p></div>
+        <div><span><svg><use href="#icon-card"></use></svg></span><p><strong>Secure payments</strong><small>M-Pesa & card accepted</small></p></div>
+      </div>
+    </section>
+
+    <section class="section categories-section" id="categories">
+      <div class="container">
+        <div class="section-heading">
+          <div><span class="section-kicker">SHOP YOUR WAY</span><h2>Popular categories</h2></div>
+          <button class="view-all" data-category="all">View all categories <svg><use href="#icon-arrow"></use></svg></button>
+        </div>
+        <div class="category-grid" id="category-grid"></div>
+      </div>
+    </section>
+
+    <section class="section deal-section" id="products">
+      <div class="container">
+        <div class="deal-heading">
+          <div class="deal-title">
+            <span class="deal-bolt"><svg><use href="#icon-zap"></use></svg></span>
+            <div><span class="section-kicker orange">LIMITED TIME</span><h2>Flash deals</h2></div>
+          </div>
+          <div class="countdown-wrap">
+            <span>Ends in</span>
+            <div class="countdown" id="countdown"><b>04</b><i>:</i><b>26</b><i>:</i><b>18</b></div>
+          </div>
+          <button class="view-all light" data-category="all">See all deals <svg><use href="#icon-arrow"></use></svg></button>
+        </div>
+        <div class="shop-toolbar" aria-label="Product filters">
+          <div class="results-summary">
+            <strong id="results-count">8 products</strong>
+            <span id="active-filter-label">Curated deals for you</span>
+          </div>
+          <div class="toolbar-controls">
+            <label class="toolbar-select">
+              <span>Price</span>
+              <select id="price-filter" aria-label="Filter by price">
+                <option value="all">All prices</option>
+                <option value="under-3000">Under KSh 3,000</option>
+                <option value="3000-10000">KSh 3,000 – 10,000</option>
+                <option value="over-10000">Over KSh 10,000</option>
+              </select>
+            </label>
+            <label class="toolbar-select">
+              <span>Sort</span>
+              <select id="sort-products" aria-label="Sort products">
+                <option value="featured">Featured</option>
+                <option value="price-low">Price: Low to high</option>
+                <option value="price-high">Price: High to low</option>
+                <option value="rating">Top rated</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="product-grid" id="product-grid"></div>
+        <div class="no-results" id="no-results">
+          <span><svg><use href="#icon-search"></use></svg></span>
+          <h3>No products found</h3>
+          <p>Try a different search or browse all products.</p>
+          <button class="primary-button" id="reset-search">View all products</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="section promise-section">
+      <div class="container promise">
+        <div class="promise-copy">
+          <span class="section-kicker">THE TALOMART PROMISE</span>
+          <h2>Tech shopping, without the guesswork.</h2>
+          <p>From your first click to unboxing, we make every step simple, secure and satisfying.</p>
+          <a href="#about">Why shop with us? <svg><use href="#icon-arrow"></use></svg></a>
+        </div>
+        <div class="promise-stats">
+          <div><strong>10K+</strong><span>Happy customers</span></div>
+          <div><strong>500+</strong><span>Quality products</span></div>
+          <div><strong>4.8/5</strong><span>Customer rating</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-main">
+      <div class="footer-brand-column">
+        <a class="brand footer-brand" href="#" aria-label="Talomart Stores home">
+          <span class="brand-mark"><span></span></span>
+          <span class="brand-name">Talo<span>mart</span><small>STORES</small></span>
+        </a>
+        <p>Your trusted source for genuine electrical accessories and mobile gear. Smart tech, fair prices, and reliable service since 2018.</p>
+        <div class="footer-socials" aria-label="Social media">
+          <a href="#facebook" aria-label="Facebook">f</a>
+          <a href="#instagram" aria-label="Instagram">◎</a>
+          <a href="#x" aria-label="X">𝕏</a>
+          <a href="#tiktok" aria-label="TikTok">♪</a>
+        </div>
+      </div>
+
+      <div class="footer-column">
+        <h3>Customer Care</h3>
+        <a href="#help">Help Center</a>
+        <a href="#returns">Returns & Refunds</a>
+        <a href="#shipping">Shipping Information</a>
+        <a href="#warranty">Warranty Policy</a>
+      </div>
+
+      <div class="footer-column">
+        <h3>Quick Links</h3>
+        <a href="#track" data-open-tracking>Track Your Order</a>
+        <a href="#payment">Secure Payment</a>
+        <a href="#offers">Exclusive Offers</a>
+        <a href="#about">About Talomart</a>
+        <a href="#admin" data-open-admin>Admin Portal</a>
+      </div>
+
+      <div class="footer-column app-column">
+        <h3>Download Our App</h3>
+        <p>Shop faster and get app-only deals.</p>
+        <div class="app-buttons">
+          <a href="#google-play" class="app-button">
+            <span class="play-icon">▶</span>
+            <span><small>GET IT ON</small><strong>Google Play</strong></span>
+          </a>
+          <a href="#app-store" class="app-button">
+            <span class="apple-icon">●</span>
+            <span><small>Download on the</small><strong>App Store</strong></span>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <div class="container footer-bottom-inner">
+        <p>© <span id="footer-year">2026</span> Talomart Stores. All rights reserved.</p>
+        <p class="footer-tagline"><span></span> Powering your connections.</p>
+        <div class="footer-legal">
+          <a href="#privacy">Privacy Policy</a>
+          <a href="#terms">Terms of Use</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <aside class="cart-drawer" id="cart-drawer" aria-hidden="true">
+    <div class="drawer-head"><h2>Your cart</h2><button id="close-cart" aria-label="Close cart">×</button></div>
+    <div class="drawer-items" id="drawer-items"></div>
+    <div class="drawer-empty" id="drawer-empty"><svg><use href="#icon-bag"></use></svg><h3>Your cart is empty</h3><p>Good tech is waiting.</p></div>
+    <div class="drawer-footer" id="drawer-footer">
+      <div><span>Subtotal</span><strong>KSh <span id="drawer-total">0</span></strong></div>
+      <p class="delivery-note"><svg><use href="#icon-delivery"></use></svg> Delivery is calculated at checkout</p>
+      <button class="primary-button" id="checkout-button">Proceed to checkout</button>
+    </div>
+  </aside>
+
+  <section class="app-modal product-modal" id="product-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="product-modal-title">
+    <button class="modal-close" data-close-modal aria-label="Close product details">×</button>
+    <div id="product-modal-content"></div>
+  </section>
+
+  <section class="app-modal auth-modal" id="auth-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+    <button class="modal-close" data-close-modal aria-label="Close account window">×</button>
+    <div class="auth-brand">
+      <span class="brand-mark"><span></span></span>
+      <div><strong>Welcome to Talomart</strong><small>One account. A smoother way to shop.</small></div>
+    </div>
+    <div class="auth-tabs" role="tablist">
+      <button class="active" data-auth-tab="login" role="tab">Sign in</button>
+      <button data-auth-tab="register" role="tab">Create account</button>
+    </div>
+    <form class="auth-form active" id="login-form" data-auth-panel="login">
+      <div class="form-heading"><h2 id="auth-title">Good to see you again</h2><p>Sign in to checkout and track your orders.</p></div>
+      <label>Email address<input type="email" name="email" placeholder="you@example.com" required></label>
+      <label>Password<input type="password" name="password" placeholder="Enter your password" minlength="6" required></label>
+      <div class="form-helper"><label class="check-label"><input type="checkbox" checked> Remember me</label><button type="button" data-forgot-password>Forgot password?</button></div>
+      <p class="form-error" data-login-error></p>
+      <button class="primary-button form-submit" type="submit">Sign in securely <svg><use href="#icon-arrow"></use></svg></button>
+      <p class="demo-hint">Demo customer: <strong>customer@talomart.co.ke</strong> / <strong>shop123</strong></p>
+    </form>
+    <form class="auth-form" id="register-form" data-auth-panel="register">
+      <div class="form-heading"><h2>Create your account</h2><p>Save favourites and enjoy faster checkout.</p></div>
+      <div class="form-row">
+        <label>First name<input type="text" name="firstName" placeholder="John" required></label>
+        <label>Last name<input type="text" name="lastName" placeholder="Kamau" required></label>
+      </div>
+      <label>Email address<input type="email" name="email" placeholder="you@example.com" required></label>
+      <label>Phone number<input type="tel" name="phone" placeholder="0712 345 678" required></label>
+      <label>Password<input type="password" name="password" placeholder="At least 6 characters" minlength="6" required></label>
+      <label class="check-label terms-check"><input type="checkbox" required> I agree to the Terms and Privacy Policy</label>
+      <p class="form-error" data-register-error></p>
+      <button class="primary-button form-submit" type="submit">Create my account <svg><use href="#icon-arrow"></use></svg></button>
+    </form>
+  </section>
+
+  <section class="app-modal checkout-modal" id="checkout-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+    <button class="modal-close" data-close-modal aria-label="Close checkout">×</button>
+    <div class="checkout-header">
+      <span class="secure-badge"><svg><use href="#icon-shield"></use></svg></span>
+      <div><span class="section-kicker">SECURE CHECKOUT</span><h2 id="checkout-title">Complete your order</h2></div>
+    </div>
+    <div id="checkout-content"></div>
+  </section>
+
+  <section class="app-modal tracking-modal" id="tracking-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="tracking-title">
+    <button class="modal-close" data-close-modal aria-label="Close order tracking">×</button>
+    <div class="tracking-header">
+      <span><svg><use href="#icon-delivery"></use></svg></span>
+      <div><span class="section-kicker">ORDER UPDATES</span><h2 id="tracking-title">Track your order</h2></div>
+    </div>
+    <form class="tracking-search" id="tracking-form">
+      <label>Order number<input id="tracking-input" placeholder="e.g. TLM-260701-1001" required></label>
+      <button class="primary-button" type="submit">Track order</button>
+    </form>
+    <div id="tracking-result" class="tracking-result"></div>
+  </section>
+
+  <section class="app-modal account-modal" id="account-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="account-title">
+    <button class="modal-close" data-close-modal aria-label="Close account dashboard">×</button>
+    <div id="account-content"></div>
+  </section>
+
+  <section class="app-modal admin-modal" id="admin-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="admin-title">
+    <button class="modal-close" data-close-modal aria-label="Close admin portal">×</button>
+    <div id="admin-content"></div>
+  </section>
+
+  <div class="overlay" id="overlay"></div>
+  <div class="toast" id="toast"><svg><use href="#icon-check"></use></svg><span>Added to cart</span></div>
+
+  <svg class="svg-sprite" aria-hidden="true">
+    <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></symbol>
+    <symbol id="icon-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path></symbol>
+    <symbol id="icon-heart" viewBox="0 0 24 24"><path d="M20.8 4.6a5.4 5.4 0 0 0-7.6 0L12 5.8l-1.2-1.2a5.4 5.4 0 0 0-7.6 7.6l1.2 1.2L12 21l7.6-7.6 1.2-1.2a5.4 5.4 0 0 0 0-7.6Z"></path></symbol>
+    <symbol id="icon-bag" viewBox="0 0 24 24"><path d="M6 8h12l1 13H5L6 8Z"></path><path d="M9 10V6a3 3 0 0 1 6 0v4"></path></symbol>
+    <symbol id="icon-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"></path></symbol>
+    <symbol id="icon-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></symbol>
+    <symbol id="icon-chevron-down" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"></path></symbol>
+    <symbol id="icon-flame" viewBox="0 0 24 24"><path d="M12 22c4 0 7-3 7-7 0-3-2-6-5-9 0 3-1 4-2 5 0-4-2-7-5-9 0 5-3 7-3 13 0 4 4 7 8 7Z"></path></symbol>
+    <symbol id="icon-headphones" viewBox="0 0 24 24"><path d="M4 14v-2a8 8 0 0 1 16 0v2"></path><path d="M4 14h3v7H5a2 2 0 0 1-2-2v-3a2 2 0 0 1 1-2ZM20 14h-3v7h2a2 2 0 0 0 2-2v-3a2 2 0 0 0-1-2Z"></path></symbol>
+    <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M5 12h14M14 7l5 5-5 5"></path></symbol>
+    <symbol id="icon-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="m9 12 2 2 4-4"></path></symbol>
+    <symbol id="icon-delivery" viewBox="0 0 24 24"><path d="M3 6h11v11H3zM14 10h4l3 3v4h-7z"></path><circle cx="7" cy="19" r="2"></circle><circle cx="18" cy="19" r="2"></circle></symbol>
+    <symbol id="icon-zap" viewBox="0 0 24 24"><path d="m13 2-9 12h8l-1 8 9-12h-8l1-8Z"></path></symbol>
+    <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"></path></symbol>
+    <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5"></path><path d="M6.1 9a7 7 0 0 1 11.5-2.6L20 9M4 15l2.4 2.6A7 7 0 0 0 17.9 15"></path></symbol>
+    <symbol id="icon-card" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"></rect><path d="M2 10h20M6 15h4"></path></symbol>
+    <symbol id="icon-star" viewBox="0 0 24 24"><path d="m12 2 3 6 7 .9-5 4.8 1.2 6.8L12 17.3l-6.2 3.2L7 13.7 2 8.9 9 8l3-6Z"></path></symbol>
+  </svg>
+  <script src="script.js"></script>
+</body>
+</html>

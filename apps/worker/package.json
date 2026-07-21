@@ -1,0 +1,26 @@
+{
+  "name": "@talomart/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx --env-file-if-exists=../../.env watch src/index.ts",
+    "build": "tsc --noEmit",
+    "start": "tsx --env-file-if-exists=../../.env src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@talomart/db": "*",
+    "bullmq": "5.79.2",
+    "pino": "10.3.1",
+    "tsx": "4.22.4",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.0",
+    "typescript": "6.0.3",
+    "vitest": "4.1.9"
+  }
+}

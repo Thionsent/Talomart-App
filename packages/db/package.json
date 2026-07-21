@@ -1,0 +1,32 @@
+{
+  "name": "@talomart/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:seed": "tsx --env-file-if-exists=../../.env src/seed.ts",
+    "db:check": "tsx --env-file-if-exists=../../.env src/check.ts",
+    "db:studio": "drizzle-kit studio",
+    "user:promote-admin": "tsx --env-file-if-exists=../../.env src/promote-admin.ts"
+  },
+  "dependencies": {
+    "dotenv": "17.2.3",
+    "drizzle-orm": "0.45.2",
+    "postgres": "3.4.9"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.0",
+    "drizzle-kit": "0.31.10",
+    "tsx": "4.22.4",
+    "typescript": "6.0.3"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "talomart-platform",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @talomart/web",
+    "dev:web": "npm run dev --workspace @talomart/web",
+    "dev:worker": "npm run dev --workspace @talomart/worker",
+    "build": "npm run build --workspace @talomart/db && npm run build --workspace @talomart/ui && npm run build --workspace @talomart/web && npm run build --workspace @talomart/worker",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "db:generate": "npm run db:generate --workspace @talomart/db",
+    "db:migrate": "npm run db:migrate --workspace @talomart/db",
+    "db:seed": "npm run db:seed --workspace @talomart/db",
+    "db:setup": "npm run db:migrate && npm run db:seed",
+    "db:check": "npm run db:check --workspace @talomart/db",
+    "db:studio": "npm run db:studio --workspace @talomart/db",
+    "admin:promote": "npm run user:promote-admin --workspace @talomart/db --",
+    "infra:up": "docker compose --env-file .env -f infra/docker-compose.yml up -d --wait",
+    "infra:status": "docker compose --env-file .env -f infra/docker-compose.yml ps",
+    "infra:down": "docker compose --env-file .env -f infra/docker-compose.yml down"
+  },
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=11.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1",
+    "postcss": "8.5.16"
+  }
+}
