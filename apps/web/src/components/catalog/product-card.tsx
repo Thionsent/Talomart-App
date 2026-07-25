@@ -4,11 +4,16 @@ import { Heart, ShoppingBag, Star } from "lucide-react";
 import Link from "next/link";
 
 import type { CatalogueProduct } from "@/lib/catalog-queries";
+import { useWishlist } from "@/components/wishlist/wishlist-provider";
 
 const formatPrice = (value: number) =>
   new Intl.NumberFormat("en-KE").format(value);
 
 export function ProductCard({ product }: { product: CatalogueProduct }) {
+  const { isSaved, toggle, ready, pendingIds } = useWishlist();
+  const saved = isSaved(product.id);
+  const pending = pendingIds.has(product.id);
+
   return (
     <article className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:border-[var(--color-green)] hover:shadow-xl">
       <Link href={`/products/${product.slug}`} className="block">
@@ -71,8 +76,20 @@ export function ProductCard({ product }: { product: CatalogueProduct }) {
               <ShoppingBag className="h-4 w-4" /> Add to cart
             </button>
           </form>
-          <button className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 text-[var(--color-navy)] transition hover:border-[var(--color-orange)] hover:text-[var(--color-orange)]">
-            <Heart className="h-4 w-4" />
+          <button
+            type="button"
+            onClick={() => void toggle(product.id)}
+            disabled={!ready || pending}
+            aria-pressed={saved}
+            aria-label={`${saved ? "Remove" : "Save"} ${product.name} ${saved ? "from" : "to"} wishlist`}
+            title={saved ? "Remove from wishlist" : "Save to wishlist"}
+            className={`inline-flex h-11 w-11 items-center justify-center rounded-xl border transition disabled:cursor-default disabled:opacity-60 ${
+              saved
+                ? "border-orange-200 bg-orange-50 text-[var(--color-orange)]"
+                : "border-slate-200 text-[var(--color-navy)] hover:border-[var(--color-orange)] hover:text-[var(--color-orange)]"
+            }`}
+          >
+            <Heart className={`h-4 w-4 ${saved ? "fill-current" : ""}`} />
           </button>
           <form action="/api/cart" method="post" className="col-span-2">
             <input type="hidden" name="productId" value={product.id} />

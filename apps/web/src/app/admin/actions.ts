@@ -6,7 +6,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { auth } from "@/lib/auth";
+import { adminAuth } from "@/lib/auth";
 import { parseCsv, specificationsFromCsv } from "@/lib/product-bulk-csv";
 import { uploadAdminImageFromForm } from "@/lib/supabase-storage";
 
@@ -30,7 +30,7 @@ const paymentStatuses = [
 ] as const;
 
 async function requireAdmin() {
-  const session = await auth.api.getSession({
+  const session = await adminAuth.api.getSession({
     headers: await headers()
   });
   const role = (session?.user as { role?: string } | undefined)?.role;

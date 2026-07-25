@@ -16,6 +16,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import { addProductToLocalCart } from "@/lib/cart-storage";
+import { useWishlist } from "@/components/wishlist/wishlist-provider";
 import {
   storefrontCategories,
   storefrontProducts,
@@ -38,7 +39,12 @@ export function StorefrontHome({
   const [activeFilter, setActiveFilter] = useState("all");
   const [priceFilter, setPriceFilter] = useState("all");
   const [sort, setSort] = useState("featured");
-  const [wishlist, setWishlist] = useState<Set<string>>(new Set());
+  const {
+    isSaved,
+    toggle: toggleSavedProduct,
+    ready: wishlistReady,
+    pendingIds: pendingWishlistIds
+  } = useWishlist();
   const [selectedProduct, setSelectedProduct] =
     useState<StoreProduct | null>(null);
   const [toast, setToast] = useState("");
@@ -47,19 +53,6 @@ export function StorefrontHome({
   );
 
   useEffect(() => {
-    const hydrationFrame = window.requestAnimationFrame(() => {
-      try {
-        setWishlist(
-          new Set(
-            JSON.parse(
-              localStorage.getItem("talomart-production-wishlist") ?? "[]"
-            )
-          )
-        );
-      } catch {
-        setWishlist(new Set());
-      }
-    });
     const timer = window.setInterval(
       () =>
         setSecondsRemaining((current) =>
@@ -68,7 +61,6 @@ export function StorefrontHome({
       1000
     );
     return () => {
-      window.cancelAnimationFrame(hydrationFrame);
       window.clearInterval(timer);
     };
   }, []);
@@ -116,23 +108,9 @@ export function StorefrontHome({
     showToast(`${product.name.split(" ").slice(0, 4).join(" ")} added to cart`);
   }
 
-  function toggleWishlist(productId: string) {
-    const updated = new Set(wishlist);
-    if (updated.has(productId)) updated.delete(productId);
-    else updated.add(productId);
-    setWishlist(updated);
-    localStorage.setItem(
-      "talomart-production-wishlist",
-      JSON.stringify([...updated])
-    );
-    window.dispatchEvent(
-      new CustomEvent("talomart:wishlist-change", { detail: updated.size })
-    );
-    showToast(
-      updated.has(productId)
-        ? "Saved to your wishlist"
-        : "Removed from wishlist"
-    );
+  async function toggleWishlist(productId: string) {
+    const saved = await toggleSavedProduct(productId);
+    showToast(saved ? "Saved to your wishlist" : "Removed from wishlist");
   }
 
   function filterAndScroll(category: string) {
@@ -402,9 +380,12 @@ export function StorefrontHome({
               <article className="product-card" key={product.id}>
                 <span className="discount">-{product.discount}%</span>
                 <button
-                  className={`wish-button ${wishlist.has(product.id) ? "active" : ""}`}
+                  type="button"
+                  className={`wish-button ${isSaved(product.id) ? "active" : ""}`}
                   onClick={() => toggleWishlist(product.id)}
-                  aria-label={`Save ${product.name}`}
+                  aria-label={`${isSaved(product.id) ? "Remove" : "Save"} ${product.name} ${isSaved(product.id) ? "from" : "to"} wishlist`}
+                  aria-pressed={isSaved(product.id)}
+                  disabled={!wishlistReady || pendingWishlistIds.has(product.id)}
                 >
                   <Heart />
                 </button>
@@ -579,9 +560,12 @@ export function StorefrontHome({
                     <ShoppingBag /> Add to cart
                   </button>
                   <button
-                    className={`detail-wish ${wishlist.has(selectedProduct.id) ? "active" : ""}`}
+                    type="button"
+                    className={`detail-wish ${isSaved(selectedProduct.id) ? "active" : ""}`}
                     onClick={() => toggleWishlist(selectedProduct.id)}
-                    aria-label={`Save ${selectedProduct.name}`}
+                    aria-label={`${isSaved(selectedProduct.id) ? "Remove" : "Save"} ${selectedProduct.name} ${isSaved(selectedProduct.id) ? "from" : "to"} wishlist`}
+                    aria-pressed={isSaved(selectedProduct.id)}
+                    disabled={!wishlistReady || pendingWishlistIds.has(selectedProduct.id)}
                   >
                     <Heart />
                   </button>

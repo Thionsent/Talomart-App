@@ -36,7 +36,8 @@ import {
   updateProduct
 } from "@/app/admin/actions";
 import { AdminSubmitButton } from "@/app/admin/form-controls";
-import { auth } from "@/lib/auth";
+import { SignOutButton } from "@/components/auth/sign-out-button";
+import { adminAuth } from "@/lib/auth";
 import {
   hasConfiguredDatabase,
   logFallback,
@@ -1289,7 +1290,7 @@ function SelectField({
 }
 
 export default async function AdminPage({ searchParams }: AdminPageProps) {
-  const session = await auth.api.getSession({
+  const session = await adminAuth.api.getSession({
     headers: await headers()
   });
 
@@ -1485,6 +1486,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 {item.label}
               </Link>
             ))}
+            <SignOutButton audience="admin" variant="menu" />
           </nav>
         </details>
 
@@ -1536,6 +1538,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   </Link>
                 ))}
               </nav>
+
+              <div className="mt-4">
+                <SignOutButton audience="admin" variant="admin" />
+              </div>
 
               <div className="mt-6 rounded-2xl bg-white p-4 text-[var(--color-navy)]">
                 <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">

@@ -1,6 +1,7 @@
 "use client";
 
 import { CreditCard, Truck } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
@@ -9,9 +10,11 @@ const formatPrice = (value: number) =>
   new Intl.NumberFormat("en-KE").format(value);
 
 export function CheckoutPageClient({
-  initialCart = []
+  initialCart = [],
+  isAuthenticated = false
 }: {
   initialCart?: LocalCartItem[];
+  isAuthenticated?: boolean;
 }) {
   const router = useRouter();
   const [cart, setCart] = useState<LocalCartItem[]>(initialCart);
@@ -118,6 +121,24 @@ export function CheckoutPageClient({
             className="rounded-3xl bg-white p-6 shadow-sm"
             onSubmit={submitCheckout}
           >
+            {!isAuthenticated && (
+              <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <strong className="text-sm text-[var(--color-navy)]">
+                    Have a Talomart account?
+                  </strong>
+                  <p className="mt-1 text-xs leading-5 text-slate-600">
+                    Sign in and return here, or continue below as a guest.
+                  </p>
+                </div>
+                <Link
+                  href="/sign-in?next=%2Fcheckout"
+                  className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-navy)] px-5 text-xs font-extrabold text-white"
+                >
+                  Sign in
+                </Link>
+              </div>
+            )}
             <h2 className="font-brand text-2xl font-extrabold">
               Delivery details
             </h2>

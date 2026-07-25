@@ -1,11 +1,11 @@
-import { SectionPage } from "@/components/layout/section-page";
+import { WishlistPageClient } from "@/components/wishlist/wishlist-page-client";
+import { getProducts } from "@/lib/catalog-queries";
 
-export default function WishlistPage() {
-  return (
-    <SectionPage
-      eyebrow="SAVED FOR LATER"
-      title="Your wishlist"
-      description="Sign in to keep favourite Talomart products synced across devices."
-    />
-  );
+export const metadata = { title: "My wishlist" };
+export const revalidate = 60;
+
+export default async function WishlistPage() {
+  const products = await getProducts({ limit: 500 });
+
+  return <WishlistPageClient products={products} />;
 }

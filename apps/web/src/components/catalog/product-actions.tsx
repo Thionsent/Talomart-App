@@ -3,8 +3,13 @@
 import { Heart, ShoppingBag } from "lucide-react";
 
 import type { CatalogueProduct } from "@/lib/catalog-queries";
+import { useWishlist } from "@/components/wishlist/wishlist-provider";
 
 export function ProductActions({ product }: { product: CatalogueProduct }) {
+  const { isSaved, toggle, ready, pendingIds } = useWishlist();
+  const saved = isSaved(product.id);
+  const pending = pendingIds.has(product.id);
+
   return (
     <div className="mt-8 grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
       <form action="/api/cart" method="post">
@@ -30,9 +35,19 @@ export function ProductActions({ product }: { product: CatalogueProduct }) {
           Buy now
         </button>
       </form>
-      <button className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-6 text-sm font-extrabold text-[var(--color-navy)] transition hover:border-[var(--color-orange)] hover:text-[var(--color-orange)]">
-        <Heart className="h-5 w-5" />
-        Save
+      <button
+        type="button"
+        onClick={() => void toggle(product.id)}
+        disabled={!ready || pending}
+        aria-pressed={saved}
+        className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border bg-white px-6 text-sm font-extrabold transition disabled:cursor-default disabled:opacity-60 ${
+          saved
+            ? "border-orange-200 bg-orange-50 text-[var(--color-orange)]"
+            : "border-slate-200 text-[var(--color-navy)] hover:border-[var(--color-orange)] hover:text-[var(--color-orange)]"
+        }`}
+      >
+        <Heart className={`h-5 w-5 ${saved ? "fill-current" : ""}`} />
+        {pending ? "Saving…" : saved ? "Saved" : "Save"}
       </button>
     </div>
   );

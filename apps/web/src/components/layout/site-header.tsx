@@ -10,8 +10,7 @@ import {
   Search,
   ShoppingBag,
   Trash2,
-  Truck,
-  UserRound
+  Truck
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -24,18 +23,27 @@ import {
   writeLocalCart
 } from "@/lib/cart-storage";
 import type { StoreProduct } from "@/lib/catalog";
+import {
+  CustomerAccountMenu,
+  type HeaderCustomer
+} from "@/components/auth/customer-account-menu";
+import { useWishlist } from "@/components/wishlist/wishlist-provider";
 
 const formatPrice = (value: number) =>
   new Intl.NumberFormat("en-KE").format(value);
 
 export function SiteHeader({
-  initialCart = []
+  initialCart = [],
+  customer = null,
+  sessionUnavailable = false
 }: {
   initialCart?: LocalCartItem[];
+  customer?: HeaderCustomer | null;
+  sessionUnavailable?: boolean;
 }) {
   const [cart, setCart] = useState<LocalCartItem[]>(initialCart);
   const [cartOpen, setCartOpen] = useState(false);
-  const [wishlistCount, setWishlistCount] = useState(0);
+  const { count: wishlistCount } = useWishlist();
 
   useEffect(() => {
     const hydrationFrame = window.requestAnimationFrame(() => {
@@ -47,11 +55,6 @@ export function SiteHeader({
         } else if (localCart.length) {
           setCart(localCart);
         }
-        setWishlistCount(
-          JSON.parse(
-            localStorage.getItem("talomart-production-wishlist") ?? "[]"
-          ).length
-        );
       } catch {
         setCart([]);
       }
@@ -74,9 +77,6 @@ export function SiteHeader({
         return updated;
       });
     };
-    const wishlistChanged = (event: Event) => {
-      setWishlistCount((event as CustomEvent<number>).detail);
-    };
     const cartSynced = (event: Event) => {
       setCart((event as CustomEvent<LocalCartItem[]>).detail);
     };
@@ -84,13 +84,11 @@ export function SiteHeader({
 
     window.addEventListener("talomart:add-to-cart", addToCart);
     window.addEventListener("talomart:cart-sync", cartSynced);
-    window.addEventListener("talomart:wishlist-change", wishlistChanged);
     window.addEventListener("talomart:open-cart", openCart);
     return () => {
       window.cancelAnimationFrame(hydrationFrame);
       window.removeEventListener("talomart:add-to-cart", addToCart);
       window.removeEventListener("talomart:cart-sync", cartSynced);
-      window.removeEventListener("talomart:wishlist-change", wishlistChanged);
       window.removeEventListener("talomart:open-cart", openCart);
     };
   }, [initialCart]);
@@ -164,19 +162,10 @@ export function SiteHeader({
           </form>
 
           <div className="header-actions">
-            <Link
-              href="/account"
-              className="header-action"
-              aria-label="Account"
-            >
-              <span className="action-icon">
-                <UserRound />
-              </span>
-              <span>
-                <small>Hello, sign in</small>
-                <strong>My Account</strong>
-              </span>
-            </Link>
+            <CustomerAccountMenu
+              customer={customer}
+              sessionUnavailable={sessionUnavailable}
+            />
             <Link
               href="/wishlist"
               className="header-action wishlist-header"

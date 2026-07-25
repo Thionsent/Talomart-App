@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth";
+import { adminAuth } from "@/lib/auth";
 import { specificationsToCsv, stringifyCsv } from "@/lib/product-bulk-csv";
 import { sql } from "@talomart/db";
 import { headers } from "next/headers";
@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 async function requireAdmin() {
-  const session = await auth.api.getSession({
+  const session = await adminAuth.api.getSession({
     headers: await headers()
   });
   const role = (session?.user as { role?: string } | undefined)?.role;

@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { auth } from "@/lib/auth";
+import { customerAuthHref } from "@/lib/auth-redirect";
 import { sql } from "@talomart/db";
 
 export const dynamic = "force-dynamic";
@@ -51,13 +52,13 @@ export default async function AccountPage() {
           </p>
           <div className="mt-6 flex justify-center gap-3">
             <Link
-              href="/sign-in"
+              href={customerAuthHref("/sign-in", "/account")}
               className="inline-flex min-h-11 items-center rounded-xl bg-[var(--color-green)] px-6 text-sm font-extrabold text-white"
             >
               Sign in
             </Link>
             <Link
-              href="/sign-up"
+              href={customerAuthHref("/sign-up", "/account")}
               className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 px-6 text-sm font-extrabold"
             >
               Create account
@@ -131,7 +132,7 @@ export default async function AccountPage() {
           ))}
         </div>
 
-        <section className="mt-7 rounded-3xl bg-white p-6 shadow-sm">
+        <section id="orders" className="mt-7 scroll-mt-6 rounded-3xl bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
               <span className="text-xs font-extrabold tracking-[0.22em] text-[var(--color-green)]">

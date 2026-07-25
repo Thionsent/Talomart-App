@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { DM_Sans, Manrope } from "next/font/google";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
+import { WishlistProvider } from "@/components/wishlist/wishlist-provider";
 import { getServerCart, SERVER_CART_COOKIE } from "@/lib/server-cart";
+import { auth } from "@/lib/auth";
 
 import "./globals.css";
 
@@ -40,16 +42,49 @@ export const metadata: Metadata = {
 export default async function RootLayout({
   children
 }: Readonly<{ children: React.ReactNode }>) {
-  const cookieStore = await cookies();
-  const initialCart = await getServerCart(
-    cookieStore.get(SERVER_CART_COOKIE)?.value
-  );
+  const [cookieStore, requestHeaders] = await Promise.all([cookies(), headers()]);
+  const [initialCart, sessionResult] = await Promise.all([
+    getServerCart(cookieStore.get(SERVER_CART_COOKIE)?.value),
+    auth.api
+      .getSession({ headers: requestHeaders })
+      .then((session) => ({ session, error: null }))
+      .catch((error: unknown) => ({ session: null, error }))
+  ]);
+  let customer: { name: string; email: string } | null = null;
+  const sessionUnavailable = Boolean(sessionResult.error);
+  const role = (
+    sessionResult.session?.user as { role?: string } | undefined
+  )?.role;
+
+  if (sessionResult.session && role === "customer") {
+    customer = {
+      name: sessionResult.session.user.name,
+      email: sessionResult.session.user.email
+    };
+  }
+
+  if (sessionResult.error) {
+    console.error(
+      "Unable to resolve the storefront customer session.",
+      sessionResult.error
+    );
+  }
 
   return (
-    <html lang="en" className={`${dmSans.variable} ${manrope.variable}`}>
+    <html
+      lang="en"
+      className={`${dmSans.variable} ${manrope.variable}`}
+      data-scroll-behavior="smooth"
+    >
       <body>
-        <SiteHeader initialCart={initialCart} />
-        <main>{children}</main>
+        <WishlistProvider authenticated={Boolean(customer)}>
+          <SiteHeader
+            initialCart={initialCart}
+            customer={customer}
+            sessionUnavailable={sessionUnavailable}
+          />
+          <main>{children}</main>
+        </WishlistProvider>
         <SiteFooter />
       </body>
     </html>

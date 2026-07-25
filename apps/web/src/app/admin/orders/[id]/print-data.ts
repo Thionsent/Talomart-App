@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth";
+import { adminAuth } from "@/lib/auth";
 import { sql } from "@talomart/db";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
@@ -36,7 +36,7 @@ export type PrintOrder = {
 };
 
 export async function requirePrintableOrder(orderId: string) {
-  const session = await auth.api.getSession({
+  const session = await adminAuth.api.getSession({
     headers: await headers()
   });
   const role = (session?.user as { role?: string } | undefined)?.role;

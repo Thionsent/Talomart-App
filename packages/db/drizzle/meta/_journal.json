@@ -36,6 +36,13 @@
       "when": 1784566719270,
       "tag": "0004_tough_centennial",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784752815876,
+      "tag": "0005_blushing_blonde_phantom",
+      "breakpoints": true
     }
   ]
 }

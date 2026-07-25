@@ -73,6 +73,9 @@ export const users = pgTable(
     emailVerified: boolean("email_verified").notNull().default(false),
     image: text("image"),
     phone: text("phone"),
+    marketingConsent: boolean("marketing_consent").notNull().default(false),
+    termsAcceptedAt: timestamp("terms_accepted_at", { withTimezone: true }),
+    termsVersion: text("terms_version"),
     role: userRoleEnum("role").notNull().default("customer"),
     ...timestamps
   },
