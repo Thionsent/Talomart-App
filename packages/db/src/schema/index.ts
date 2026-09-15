@@ -1,4 +1,5 @@
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -24,6 +25,16 @@ export const userRoleEnum = pgEnum("user_role", [
   "customer",
   "staff",
   "admin"
+]);
+
+export const staffPermissionEnum = pgEnum("staff_permission", [
+  "catalog.manage",
+  "inventory.manage",
+  "orders.manage",
+  "customers.read",
+  "analytics.read",
+  "staff.manage",
+  "audit.read"
 ]);
 
 export const orderStatusEnum = pgEnum("order_status", [
@@ -77,6 +88,7 @@ export const users = pgTable(
     termsAcceptedAt: timestamp("terms_accepted_at", { withTimezone: true }),
     termsVersion: text("terms_version"),
     role: userRoleEnum("role").notNull().default("customer"),
+    twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
     ...timestamps
   },
   (table) => [uniqueIndex("user_email_unique").on(table.email)]
@@ -313,12 +325,17 @@ export const orders = pgTable(
     discountMinor: integer("discount_minor").notNull().default(0),
     totalMinor: integer("total_minor").notNull(),
     currency: text("currency").notNull().default("KES"),
+    customerEmail: text("customer_email"),
     recipientName: text("recipient_name").notNull(),
     phone: text("phone").notNull(),
     county: text("county").notNull(),
     town: text("town").notNull(),
     deliveryAddress: text("delivery_address").notNull(),
     customerNote: text("customer_note"),
+    guestAccessTokenHash: text("guest_access_token_hash"),
+    guestAccessExpiresAt: timestamp("guest_access_expires_at", {
+      withTimezone: true
+    }),
     placedAt: timestamp("placed_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -328,6 +345,152 @@ export const orders = pgTable(
     uniqueIndex("order_number_unique").on(table.orderNumber),
     index("order_user_idx").on(table.userId),
     index("order_status_created_idx").on(table.status, table.createdAt)
+  ]
+);
+
+export const orderStatusHistory = pgTable(
+  "order_status_history",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "restrict" }),
+    previousStatus: orderStatusEnum("previous_status"),
+    nextStatus: orderStatusEnum("next_status").notNull(),
+    source: text("source").notNull(),
+    reason: text("reason"),
+    // Preserve the actor identifier as an immutable audit snapshot. A foreign
+    // key with ON DELETE SET NULL would conflict with the append-only trigger.
+    actorId: text("actor_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+  },
+  (table) => [
+    index("order_status_history_order_created_idx").on(
+      table.orderId,
+      table.createdAt
+    ),
+    index("order_status_history_actor_idx").on(table.actorId)
+  ]
+);
+
+export const twoFactors = pgTable(
+  "two_factors",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    secret: text("secret").notNull(),
+    backupCodes: text("backup_codes").notNull(),
+    verified: boolean("verified").notNull().default(false),
+    failedVerificationCount: integer("failed_verification_count")
+      .notNull()
+      .default(0),
+    lockedUntil: timestamp("locked_until", { withTimezone: true })
+  },
+  (table) => [
+    uniqueIndex("two_factor_user_unique").on(table.userId),
+    index("two_factor_secret_idx").on(table.secret)
+  ]
+);
+
+export const authRateLimits = pgTable(
+  "auth_rate_limits",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull(),
+    count: integer("count").notNull(),
+    lastRequest: bigint("last_request", { mode: "number" }).notNull()
+  },
+  (table) => [uniqueIndex("auth_rate_limit_key_unique").on(table.key)]
+);
+
+export const staffPermissions = pgTable(
+  "staff_permissions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    permission: staffPermissionEnum("permission").notNull(),
+    grantedBy: text("granted_by").references(() => users.id, {
+      onDelete: "set null"
+    }),
+    ...timestamps
+  },
+  (table) => [
+    uniqueIndex("staff_permission_user_scope_unique").on(
+      table.userId,
+      table.permission
+    ),
+    index("staff_permission_user_idx").on(table.userId)
+  ]
+);
+
+export const adminAuditLogs = pgTable(
+  "admin_audit_logs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    // Keep the identifier as an immutable snapshot even after an account is
+    // deactivated or removed. A foreign key could rewrite historical rows.
+    actorId: text("actor_id"),
+    actorRole: userRoleEnum("actor_role").notNull(),
+    action: text("action").notNull(),
+    resourceType: text("resource_type").notNull(),
+    resourceId: text("resource_id"),
+    summary: text("summary").notNull(),
+    before: jsonb("before").$type<Record<string, unknown> | null>(),
+    after: jsonb("after").$type<Record<string, unknown> | null>(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+  },
+  (table) => [
+    index("admin_audit_actor_created_idx").on(
+      table.actorId,
+      table.createdAt
+    ),
+    index("admin_audit_resource_idx").on(
+      table.resourceType,
+      table.resourceId
+    ),
+    index("admin_audit_created_idx").on(table.createdAt)
+  ]
+);
+
+export const endpointRateLimits = pgTable(
+  "endpoint_rate_limits",
+  {
+    keyHash: text("key_hash").primaryKey(),
+    attempts: integer("attempts").notNull().default(1),
+    windowStartedAt: timestamp("window_started_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+  },
+  (table) => [index("endpoint_rate_limit_updated_idx").on(table.updatedAt)]
+);
+
+export const orderLookupRateLimits = pgTable(
+  "order_lookup_rate_limits",
+  {
+    keyHash: text("key_hash").primaryKey(),
+    attempts: integer("attempts").notNull().default(1),
+    windowStartedAt: timestamp("window_started_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+  },
+  (table) => [
+    index("order_lookup_rate_limit_updated_idx").on(table.updatedAt)
   ]
 );
 
@@ -369,6 +532,7 @@ export const checkoutSessions = pgTable(
     discountMinor: integer("discount_minor").notNull().default(0),
     totalMinor: integer("total_minor").notNull().default(0),
     currency: text("currency").notNull().default("KES"),
+    customerEmail: text("customer_email"),
     recipientName: text("recipient_name"),
     phone: text("phone"),
     county: text("county"),
@@ -405,6 +569,10 @@ export const payments = pgTable(
     providerReference: text("provider_reference"),
     merchantRequestId: text("merchant_request_id"),
     checkoutRequestId: text("checkout_request_id"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastInitiatedAt: timestamp("last_initiated_at", { withTimezone: true }),
+    providerQueriedAt: timestamp("provider_queried_at", { withTimezone: true }),
+    providerQueryStatus: text("provider_query_status"),
     phone: text("phone"),
     paidAt: timestamp("paid_at", { withTimezone: true }),
     failureReason: text("failure_reason"),
@@ -488,6 +656,14 @@ export const notificationEvents = pgTable(
     audience: text("audience").notNull().default("customer"),
     channel: text("channel").notNull().default("internal"),
     status: text("status").notNull().default("pending"),
+    dedupeKey: text("dedupe_key"),
+    recipientEmail: text("recipient_email"),
+    providerMessageId: text("provider_message_id"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    providerEventAt: timestamp("provider_event_at", { withTimezone: true }),
+    lastError: text("last_error"),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
     processedAt: timestamp("processed_at", { withTimezone: true }),
     ...timestamps
@@ -495,7 +671,35 @@ export const notificationEvents = pgTable(
   (table) => [
     index("notification_event_order_idx").on(table.orderId),
     index("notification_event_status_idx").on(table.status, table.createdAt),
-    index("notification_event_type_idx").on(table.type)
+    index("notification_event_type_idx").on(table.type),
+    uniqueIndex("notification_event_dedupe_unique").on(table.dedupeKey),
+    uniqueIndex("notification_event_provider_message_unique").on(
+      table.providerMessageId
+    ),
+    index("notification_event_retry_idx").on(
+      table.channel,
+      table.status,
+      table.nextAttemptAt
+    )
+  ]
+);
+
+export const emailWebhookEvents = pgTable(
+  "email_webhook_events",
+  {
+    svixId: text("svix_id").primaryKey(),
+    providerMessageId: text("provider_message_id").notNull(),
+    eventType: text("event_type").notNull(),
+    eventCreatedAt: timestamp("event_created_at", { withTimezone: true })
+      .notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+  },
+  (table) => [
+    index("email_webhook_provider_idx").on(table.providerMessageId),
+    index("email_webhook_created_idx").on(table.eventCreatedAt)
   ]
 );
 

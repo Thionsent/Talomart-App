@@ -38,7 +38,8 @@ Next.js web application
 
 - Supabase PostgreSQL is the source of truth for money, orders, payments, checkout state and stock.
 - Order creation and inventory reservation run in a database transaction.
-- Payment callbacks are idempotent by checkout request ID.
+- Payment callbacks and every callback side effect must be idempotent by
+  checkout request ID before production payments are enabled.
 - Currency values are stored as integer minor units, never floating point.
 - Background jobs can run more than once without corrupting state.
 - Admin authorization is checked server-side for every protected mutation.

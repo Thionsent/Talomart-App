@@ -1,25 +1,60 @@
 import { randomUUID } from "node:crypto";
 
 import { auth } from "@/lib/auth";
+import {
+  deriveCustomerAccountScope,
+  GUEST_ACCOUNT_SCOPE
+} from "@/lib/browser-account-scope";
+import { serializeDatabaseJson } from "@/lib/database-json";
+import {
+  enqueueOrderEmail,
+  processPendingTransactionalEmails
+} from "@/lib/email";
+import { env } from "@/lib/env";
+import {
+  endpointRateLimitPolicies,
+  enforceEndpointRateLimit
+} from "@/lib/endpoint-rate-limit";
 import { logger } from "@/lib/logger";
-import { initiateStkPush, isMpesaConfigured } from "@/lib/payments/mpesa";
-import { SERVER_CART_COOKIE } from "@/lib/server-cart";
+import {
+  deriveGuestOrderAccessToken,
+  GUEST_ORDER_ACCESS_MAX_AGE_SECONDS,
+  guestOrderAccessCookieName,
+  hashGuestOrderAccessToken
+} from "@/lib/order-access";
+import { recordOrderStatusTransition } from "@/lib/order-status-history";
+import {
+  getMpesaConfigurationStatus,
+  initiateStkPush,
+  normalizeMpesaPhone
+} from "@/lib/payments/mpesa";
+import { isMpesaSandboxTestSku } from "@/lib/payments/mpesa-sandbox-product";
+import { expireStaleMpesaOrders } from "@/lib/payments/mpesa-order-service";
+import { retryMpesaPersistence } from "@/lib/payments/mpesa-reconciliation";
+import {
+  LEGACY_SERVER_CART_COOKIE,
+  serverCartCookieName
+} from "@/lib/server-cart";
 import { sql } from "@talomart/db";
 import { headers } from "next/headers";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
 
 const checkoutSchema = z.object({
+  idempotencyKey: z.string().uuid().optional(),
   items: z
     .array(
       z.object({
-        productId: z.string().uuid(),
+        productId: z
+          .string()
+          .uuid("This product is unavailable. Add it again from the live catalogue."),
         quantity: z.number().int().min(1).max(99)
       })
     )
     .min(1, "Your cart is empty."),
   delivery: z.object({
     recipientName: z.string().trim().min(2).max(120),
+    email: z.string().trim().email().max(254),
     phone: z.string().trim().min(9).max(30),
     county: z.string().trim().min(2).max(80),
     town: z.string().trim().min(2).max(80),
@@ -105,37 +140,228 @@ async function releasePaymentReservations(orderId: string, reason: string) {
       }
     }
 
-    await transaction`
+    const [cancelled] = await transaction<{ id: string }[]>`
       update orders
       set status = 'cancelled', updated_at = now()
       where id = ${orderId}::uuid
         and status = 'pending_payment'
+      returning id::text
     `;
+
+    if (cancelled) {
+      await recordOrderStatusTransition(
+        transaction as unknown as typeof sql,
+        {
+          orderId,
+          previousStatus: "pending_payment",
+          nextStatus: "cancelled",
+          source: "system",
+          reason
+        }
+      );
+      await enqueueOrderEmail(transaction as unknown as typeof sql, {
+        orderId,
+        type: "order_cancelled"
+      });
+    }
   });
 }
 
+type AcceptedStkPush = Awaited<ReturnType<typeof initiateStkPush>>;
+
+async function persistAcceptedStkPush(
+  paymentId: string,
+  stk: AcceptedStkPush
+) {
+  await retryMpesaPersistence(async () => {
+    await sql`
+      update payments
+      set
+        status = case
+          when status in ('paid', 'refunded') then status
+          else 'processing'
+        end,
+        merchant_request_id = ${stk.MerchantRequestID},
+        checkout_request_id = ${stk.CheckoutRequestID},
+        provider_query_status = null,
+        provider_queried_at = null,
+        failure_reason = null,
+        updated_at = now()
+      where id = ${paymentId}::uuid
+    `;
+  });
+
+  try {
+    await sql`
+      update payments
+      set
+        provider_payload = ${serializeDatabaseJson(stk)}::jsonb,
+        updated_at = now()
+      where id = ${paymentId}::uuid
+    `;
+  } catch (error) {
+    logger.warn(
+      {
+        error,
+        paymentId,
+        checkoutRequestId: stk.CheckoutRequestID
+      },
+      "M-Pesa STK identifiers were saved but its audit payload was not"
+    );
+  }
+}
+
 export async function POST(request: Request) {
-  const parsed = checkoutSchema.safeParse(await request.json());
+  const rateLimitResponse = await enforceEndpointRateLimit(
+    request,
+    endpointRateLimitPolicies.checkout
+  );
+  if (rateLimitResponse) return rateLimitResponse;
+
+  const parsed = checkoutSchema.safeParse(
+    await request.json().catch(() => null)
+  );
 
   if (!parsed.success) {
     return Response.json(
       {
         error: "Invalid checkout details.",
-        issues: parsed.error.flatten().fieldErrors
+        issues: parsed.error.issues.map((issue) => ({
+          path: issue.path.map(String),
+          message: issue.message
+        }))
       },
       { status: 400 }
     );
+  }
+
+  try {
+    await expireStaleMpesaOrders(10);
+  } catch (error) {
+    logger.warn({ error }, "Could not sweep abandoned M-Pesa orders during checkout");
+  }
+
+  const mpesaConfiguration = getMpesaConfigurationStatus();
+
+  if (parsed.data.paymentMethod === "mpesa") {
+    if (!mpesaConfiguration.configured) {
+      return Response.json(
+        {
+          error:
+            "M-Pesa checkout is temporarily unavailable. Please choose Cash on Delivery."
+        },
+        { status: 503 }
+      );
+    }
+
+    try {
+      normalizeMpesaPhone(parsed.data.delivery.phone);
+    } catch (error) {
+      return Response.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Enter a valid Kenyan M-Pesa phone number."
+        },
+        { status: 400 }
+      );
+    }
   }
 
   const session = await auth.api.getSession({
     headers: await headers()
   });
   const userId = session?.user.id ?? null;
+  const cartScope = userId
+    ? deriveCustomerAccountScope(userId, env.AUTH_SECRET)
+    : GUEST_ACCOUNT_SCOPE;
   const guestToken = userId ? null : randomUUID();
   const orderNumber = makeOrderNumber();
+  const checkoutIdempotencyKey = parsed.data.idempotencyKey ?? randomUUID();
+  const guestAccessToken = userId
+    ? null
+    : deriveGuestOrderAccessToken({
+        checkoutIdempotencyKey,
+        orderNumber,
+        secret: env.AUTH_SECRET
+      });
+  const guestAccessTokenHash = guestAccessToken
+    ? hashGuestOrderAccessToken(guestAccessToken, env.AUTH_SECRET)
+    : null;
+  const guestAccessExpiresAt = guestAccessToken
+    ? new Date(
+        Date.now() + GUEST_ORDER_ACCESS_MAX_AGE_SECONDS * 1000
+      ).toISOString()
+    : null;
 
   try {
     const result = await sql.begin(async (transaction) => {
+      await transaction`
+        select pg_advisory_xact_lock(
+          hashtextextended(${checkoutIdempotencyKey}, 0)
+        )
+      `;
+
+      const [existingCheckout] = await transaction<
+        {
+          orderId: string;
+          orderNumber: string;
+          paymentId: string;
+          paymentStatus: string;
+          subtotalMinor: number;
+          deliveryMinor: number;
+          discountMinor: number;
+          totalMinor: number;
+          currency: string;
+          paymentMethod: "mpesa" | "cash_on_delivery";
+          merchantRequestId: string | null;
+          checkoutRequestId: string | null;
+          userId: string | null;
+        }[]
+      >`
+        select
+          o.id::text as "orderId",
+          o.order_number as "orderNumber",
+          p.id::text as "paymentId",
+          p.status as "paymentStatus",
+          o.subtotal_minor as "subtotalMinor",
+          o.delivery_minor as "deliveryMinor",
+          o.discount_minor as "discountMinor",
+          o.total_minor as "totalMinor",
+          o.currency,
+          o.payment_method as "paymentMethod",
+          p.merchant_request_id as "merchantRequestId",
+          p.checkout_request_id as "checkoutRequestId",
+          o.user_id as "userId"
+        from payments p
+        inner join orders o on o.id = p.order_id
+        where p.idempotency_key = ${checkoutIdempotencyKey}
+        limit 1
+      `;
+
+      if (existingCheckout) {
+        const { userId: existingUserId, ...existingCheckoutResult } =
+          existingCheckout;
+        if (existingUserId !== userId) {
+          throw new Error("This checkout request belongs to another session.");
+        }
+
+        const existingGuestAccessToken = userId
+          ? null
+          : deriveGuestOrderAccessToken({
+              checkoutIdempotencyKey,
+              orderNumber: existingCheckout.orderNumber,
+              secret: env.AUTH_SECRET
+            });
+
+        return {
+          ...existingCheckoutResult,
+          guestAccessToken: existingGuestAccessToken,
+          reused: true
+        };
+      }
+
       const productIds = parsed.data.items.map((item) => item.productId);
       const products = await transaction<
         {
@@ -187,9 +413,17 @@ export async function POST(request: Request) {
         (sum, line) => sum + line.lineTotalMinor,
         0
       );
-      const deliveryMinor = subtotalMinor >= 500_000 ? 0 : 35_000;
+      const isSandboxTestOrder =
+        mpesaConfiguration.environment === "sandbox" &&
+        orderLines.length > 0 &&
+        orderLines.every((line) => isMpesaSandboxTestSku(line.product.sku));
+      const deliveryMinor =
+        isSandboxTestOrder || subtotalMinor >= 500_000 ? 0 : 35_000;
       const discountMinor = 0;
       const totalMinor = subtotalMinor + deliveryMinor - discountMinor;
+      const customerEmail = userId
+        ? session!.user.email.toLowerCase()
+        : parsed.data.delivery.email.toLowerCase();
 
       const [cart] = await transaction<{ id: string }[]>`
         insert into carts (user_id, guest_token, expires_at)
@@ -221,12 +455,15 @@ export async function POST(request: Request) {
           discount_minor,
           total_minor,
           currency,
+          customer_email,
           recipient_name,
           phone,
           county,
           town,
           delivery_address,
-          customer_note
+          customer_note,
+          guest_access_token_hash,
+          guest_access_expires_at
         )
         values (
           ${orderNumber},
@@ -238,17 +475,33 @@ export async function POST(request: Request) {
           ${discountMinor},
           ${totalMinor},
           'KES',
+          ${customerEmail},
           ${parsed.data.delivery.recipientName},
           ${parsed.data.delivery.phone},
           ${parsed.data.delivery.county},
           ${parsed.data.delivery.town},
           ${parsed.data.delivery.deliveryAddress},
-          ${parsed.data.delivery.customerNote || null}
+          ${parsed.data.delivery.customerNote || null},
+          ${guestAccessTokenHash},
+          ${guestAccessExpiresAt}
         )
         returning id::text, order_number as "orderNumber"
       `;
 
       if (!order) throw new Error("Could not create order.");
+
+      await recordOrderStatusTransition(
+        transaction as unknown as typeof sql,
+        {
+          orderId: order.id,
+          previousStatus: null,
+          nextStatus:
+            parsed.data.paymentMethod === "cash_on_delivery"
+              ? "processing"
+              : "pending_payment",
+          source: "checkout"
+        }
+      );
 
       await transaction`
         insert into checkout_sessions (
@@ -262,6 +515,7 @@ export async function POST(request: Request) {
           discount_minor,
           total_minor,
           currency,
+          customer_email,
           recipient_name,
           phone,
           county,
@@ -282,6 +536,7 @@ export async function POST(request: Request) {
           ${discountMinor},
           ${totalMinor},
           'KES',
+          ${customerEmail},
           ${parsed.data.delivery.recipientName},
           ${parsed.data.delivery.phone},
           ${parsed.data.delivery.county},
@@ -371,13 +626,18 @@ export async function POST(request: Request) {
           'pending',
           ${totalMinor},
           'KES',
-          ${randomUUID()},
+          ${checkoutIdempotencyKey},
           ${parsed.data.delivery.phone}
         )
         returning id::text, status
       `;
 
       if (!payment) throw new Error("Could not create payment record.");
+
+      await enqueueOrderEmail(transaction as unknown as typeof sql, {
+        orderId: order.id,
+        type: "order_confirmation"
+      });
 
       await transaction`
         insert into notification_events (
@@ -438,90 +698,195 @@ export async function POST(request: Request) {
         discountMinor,
         totalMinor,
         currency: "KES",
-        paymentMethod: parsed.data.paymentMethod
+        paymentMethod: parsed.data.paymentMethod,
+        merchantRequestId: null,
+        checkoutRequestId: null,
+        guestAccessToken,
+        reused: false
       };
     });
+
+    after(() =>
+      processPendingTransactionalEmails().catch((error) => {
+        logger.error({ error }, "Post-checkout email delivery sweep failed");
+      })
+    );
 
     let mpesa:
       | {
           initiated: boolean;
           customerMessage: string;
           checkoutRequestId?: string;
-          setupRequired?: boolean;
+          persistencePending?: boolean;
         }
       | undefined;
 
     if (result.paymentMethod === "mpesa") {
-      if (!isMpesaConfigured()) {
+      if (
+        result.checkoutRequestId ||
+        result.paymentStatus === "paid"
+      ) {
         mpesa = {
-          initiated: false,
-          setupRequired: true,
+          initiated: true,
+          ...(result.checkoutRequestId
+            ? { checkoutRequestId: result.checkoutRequestId }
+            : {}),
           customerMessage:
-            "M-Pesa STK Push is not configured yet. Your order is saved as pending payment."
+            result.paymentStatus === "paid"
+              ? "Payment has already been confirmed."
+              : "The M-Pesa request is already being processed."
         };
+      } else if (result.paymentStatus === "failed") {
+        return Response.json(
+          {
+            error:
+              "The previous M-Pesa attempt failed. Please submit checkout again to start a new request.",
+            order: {
+              orderId: result.orderId,
+              orderNumber: result.orderNumber
+            }
+          },
+          { status: 409 }
+        );
       } else {
-        try {
-          const stk = await initiateStkPush({
-            phone: parsed.data.delivery.phone,
-            amountKes: Math.round(result.totalMinor / 100),
-            orderNumber: result.orderNumber
-          });
+        const [claimedPayment] = await sql<{ id: string }[]>`
+          update payments
+          set
+            status = 'processing',
+            attempt_count = attempt_count + 1,
+            last_initiated_at = now(),
+            provider_query_status = null,
+            provider_queried_at = null,
+            updated_at = now()
+          where id = ${result.paymentId}::uuid
+            and (
+              status = 'pending'
+              or (
+                status = 'processing'
+                and checkout_request_id is null
+                and updated_at < now() - interval '2 minutes'
+              )
+            )
+          returning id::text
+        `;
 
-          await sql`
-            update payments
-            set
-              status = 'processing',
-              merchant_request_id = ${stk.MerchantRequestID},
-              checkout_request_id = ${stk.CheckoutRequestID},
-              provider_payload = ${sql.json(stk)}::jsonb,
-              updated_at = now()
+        if (!claimedPayment) {
+          const [currentPayment] = await sql<
+            { status: string; checkoutRequestId: string | null }[]
+          >`
+            select
+              status,
+              checkout_request_id as "checkoutRequestId"
+            from payments
             where id = ${result.paymentId}::uuid
           `;
 
+          if (currentPayment?.status === "failed") {
+            return Response.json(
+              {
+                error:
+                  "The M-Pesa request failed. Please submit checkout again to start a new request.",
+                order: {
+                  orderId: result.orderId,
+                  orderNumber: result.orderNumber
+                }
+              },
+              { status: 409 }
+            );
+          }
+
+          result.paymentStatus = currentPayment?.status ?? result.paymentStatus;
+          result.checkoutRequestId =
+            currentPayment?.checkoutRequestId ?? result.checkoutRequestId;
+          mpesa = {
+            initiated: true,
+            ...(currentPayment?.checkoutRequestId
+              ? { checkoutRequestId: currentPayment.checkoutRequestId }
+              : {}),
+            customerMessage:
+              currentPayment?.status === "paid"
+                ? "Payment has already been confirmed."
+                : "The M-Pesa request is already being processed."
+          };
+        } else {
+          let stk: AcceptedStkPush;
+
+          try {
+            stk = await initiateStkPush({
+              phone: parsed.data.delivery.phone,
+              amountKes: Math.round(result.totalMinor / 100),
+              orderNumber: result.orderNumber
+            });
+          } catch (error) {
+            logger.error(
+              { error, orderId: result.orderId },
+              "M-Pesa rejected or did not receive the STK Push request"
+            );
+            const failureReason =
+              error instanceof Error
+                ? error.message
+                : "M-Pesa STK Push request failed";
+
+            await sql`
+              update payments
+              set
+                status = 'failed',
+                failure_reason = ${failureReason},
+                updated_at = now()
+              where id = ${result.paymentId}::uuid
+                and status <> 'paid'
+            `;
+            await releasePaymentReservations(
+              result.orderId,
+              `Released reservation after rejected M-Pesa initiation for order ${result.orderNumber}`
+            );
+
+            return Response.json(
+              {
+                error:
+                  "M-Pesa did not accept the payment prompt. Please try again or choose Cash on delivery.",
+                order: {
+                  orderId: result.orderId,
+                  orderNumber: result.orderNumber
+                }
+              },
+              { status: 502 }
+            );
+          }
+
+          let persistencePending = false;
+          try {
+            await persistAcceptedStkPush(result.paymentId, stk);
+          } catch (error) {
+            persistencePending = true;
+            logger.error(
+              {
+                error,
+                orderId: result.orderId,
+                paymentId: result.paymentId,
+                checkoutRequestId: stk.CheckoutRequestID
+              },
+              "M-Pesa accepted the STK Push but identifier persistence is pending"
+            );
+          }
+
           result.paymentStatus = "processing";
+          result.merchantRequestId = stk.MerchantRequestID;
+          result.checkoutRequestId = stk.CheckoutRequestID;
           mpesa = {
             initiated: true,
             checkoutRequestId: stk.CheckoutRequestID,
-            customerMessage: stk.CustomerMessage
+            customerMessage: stk.CustomerMessage,
+            persistencePending
           };
-        } catch (error) {
-          logger.error({ error, orderId: result.orderId }, "M-Pesa STK Push failed");
-          const failureReason =
-            error instanceof Error
-              ? error.message
-              : "M-Pesa STK Push request failed";
-
-          await sql`
-            update payments
-            set
-              status = 'failed',
-              failure_reason = ${failureReason},
-              updated_at = now()
-            where id = ${result.paymentId}::uuid
-          `;
-          await releasePaymentReservations(
-            result.orderId,
-            `Released reservation after failed M-Pesa initiation for order ${result.orderNumber}`
-          );
-
-          return Response.json(
-            {
-              error:
-                "We could not send the M-Pesa prompt. Please try again or choose Cash on delivery.",
-              order: {
-                orderId: result.orderId,
-                orderNumber: result.orderNumber
-              }
-            },
-            { status: 502 }
-          );
         }
       }
     }
 
+    const { guestAccessToken: accessToken, ...publicResult } = result;
     const response = NextResponse.json({
       order: {
-        ...result,
+        ...publicResult,
         subtotal: Math.round(result.subtotalMinor / 100),
         delivery: Math.round(result.deliveryMinor / 100),
         discount: Math.round(result.discountMinor / 100),
@@ -529,7 +894,23 @@ export async function POST(request: Request) {
         mpesa
       }
     });
-    response.cookies.delete(SERVER_CART_COOKIE);
+    response.cookies.delete(serverCartCookieName(cartScope));
+    if (cartScope === GUEST_ACCOUNT_SCOPE) {
+      response.cookies.delete(LEGACY_SERVER_CART_COOKIE);
+    }
+    if (accessToken) {
+      response.cookies.set(
+        guestOrderAccessCookieName(result.orderNumber, env.AUTH_SECRET),
+        accessToken,
+        {
+          httpOnly: true,
+          sameSite: "lax",
+          secure: env.NODE_ENV === "production",
+          path: "/",
+          maxAge: GUEST_ORDER_ACCESS_MAX_AGE_SECONDS
+        }
+      );
+    }
 
     return response;
   } catch (error) {

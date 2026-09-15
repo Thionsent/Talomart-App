@@ -50,5 +50,19 @@ export function logFallback(label: string, error: unknown) {
     return;
   }
 
-  console.warn(`${label}. Serving resilient fallback data.`, { error });
+  const details =
+    error instanceof Error
+      ? {
+          name: error.name,
+          message: error.message,
+          code:
+            "code" in error && typeof error.code === "string"
+              ? error.code
+              : undefined
+        }
+      : { message: String(error) };
+
+  console.warn(
+    `${label}. Serving resilient fallback data. ${JSON.stringify(details)}`
+  );
 }

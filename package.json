@@ -19,8 +19,13 @@
     "db:seed": "npm run db:seed --workspace @talomart/db",
     "db:setup": "npm run db:migrate && npm run db:seed",
     "db:check": "npm run db:check --workspace @talomart/db",
+    "security:check": "node --env-file=.env scripts/check-security-schema.mjs",
     "db:studio": "npm run db:studio --workspace @talomart/db",
     "admin:promote": "npm run user:promote-admin --workspace @talomart/db --",
+    "mpesa:sandbox:check": "node --env-file=.env scripts/check-mpesa-sandbox.mjs",
+    "mpesa:sandbox:proxy": "node scripts/mpesa-callback-proxy.mjs",
+    "mpesa:sandbox:product:ensure": "npm run mpesa:sandbox:product --workspace @talomart/db -- ensure",
+    "mpesa:sandbox:product:disable": "npm run mpesa:sandbox:product --workspace @talomart/db -- disable",
     "infra:up": "docker compose --env-file .env -f infra/docker-compose.yml up -d --wait",
     "infra:status": "docker compose --env-file .env -f infra/docker-compose.yml ps",
     "infra:down": "docker compose --env-file .env -f infra/docker-compose.yml down"
@@ -31,6 +36,6 @@
   },
   "devDependencies": {
     "esbuild": "0.28.1",
-    "postcss": "8.5.16"
+    "postcss": "8.5.28"
   }
 }

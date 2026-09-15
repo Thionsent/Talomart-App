@@ -1,4 +1,6 @@
 import Link from "next/link";
+import Image from "next/image";
+import { businessInfo } from "@/lib/business-info";
 
 export function SiteFooter() {
   return (
@@ -18,23 +20,21 @@ export function SiteFooter() {
               <small>STORES</small>
             </span>
           </Link>
+          <Image
+            src="/talomart-logo.png"
+            alt="Talomart Stores"
+            width={112}
+            height={112}
+            className="mt-4 rounded-2xl"
+          />
           <p>
-            Your trusted source for genuine electrical accessories and mobile
-            gear. Smart tech, fair prices, and reliable service since 2018.
+            Genuine electrical accessories and mobile gear, backed by helpful
+            local support from Talomart Stores.
           </p>
           <div className="footer-socials" aria-label="Social media">
-            <a href="#facebook" aria-label="Facebook">
-              f
-            </a>
-            <a href="#instagram" aria-label="Instagram">
-              ◎
-            </a>
-            <a href="#x" aria-label="X">
-              𝕏
-            </a>
-            <a href="#tiktok" aria-label="TikTok">
-              ♪
-            </a>
+            <a href={businessInfo.social.facebook} target="_blank" rel="noreferrer" aria-label="Talomart on Facebook">f</a>
+            <a href={businessInfo.social.instagram} target="_blank" rel="noreferrer" aria-label="Talomart on Instagram">◎</a>
+            <a href={businessInfo.social.x} target="_blank" rel="noreferrer" aria-label="Talomart on X">𝕏</a>
           </div>
         </div>
 
@@ -52,28 +52,14 @@ export function SiteFooter() {
           <Link href="/payments">Secure Payment</Link>
           <Link href="/offers">Exclusive Offers</Link>
           <Link href="/about">About Talomart</Link>
-          <Link href="/admin">Admin Portal</Link>
         </div>
 
-        <div className="footer-column app-column">
-          <h3>Download Our App</h3>
-          <p>Shop faster and get app-only deals.</p>
-          <div className="app-buttons">
-            <a href="#google-play" className="app-button">
-              <span className="play-icon">▶</span>
-              <span>
-                <small>GET IT ON</small>
-                <strong>Google Play</strong>
-              </span>
-            </a>
-            <a href="#app-store" className="app-button">
-              <span className="apple-icon">●</span>
-              <span>
-                <small>Download on the</small>
-                <strong>App Store</strong>
-              </span>
-            </a>
-          </div>
+        <div className="footer-column contact-column">
+          <h3>Talk to us</h3>
+          <a href={`tel:${businessInfo.phone}`}>{businessInfo.phoneDisplay}</a>
+          <a href={businessInfo.whatsappUrl} target="_blank" rel="noreferrer">WhatsApp us</a>
+          <a href={`mailto:${businessInfo.supportEmail}`}>{businessInfo.supportEmail}</a>
+          <p>{businessInfo.location}</p>
         </div>
       </div>
 

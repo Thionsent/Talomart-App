@@ -14,8 +14,12 @@ import {
   Zap
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
-import { addProductToLocalCart } from "@/lib/cart-storage";
+import {
+  addProductToLocalCart,
+  persistCartAddition
+} from "@/lib/cart-storage";
 import { useWishlist } from "@/components/wishlist/wishlist-provider";
 import {
   storefrontCategories,
@@ -23,6 +27,10 @@ import {
   type StoreCategory,
   type StoreProduct
 } from "@/lib/catalog";
+import {
+  isDemoCartProductId,
+  isUuidCartProductId
+} from "@/lib/cart-product-id";
 
 const formatPrice = (value: number) =>
   new Intl.NumberFormat("en-KE").format(value);
@@ -36,6 +44,7 @@ export function StorefrontHome({
   categories = storefrontCategories,
   products = storefrontProducts
 }: StorefrontHomeProps) {
+  const router = useRouter();
   const [activeFilter, setActiveFilter] = useState("all");
   const [priceFilter, setPriceFilter] = useState("all");
   const [sort, setSort] = useState("featured");
@@ -90,6 +99,9 @@ export function StorefrontHome({
     if (sort === "rating") visible.sort((a, b) => b.rating - a.rating);
     return visible;
   }, [activeFilter, priceFilter, products, sort]);
+  const hasPreviewProducts = products.some((product) =>
+    isDemoCartProductId(product.id)
+  );
 
   const hours = String(Math.floor(secondsRemaining / 3600)).padStart(2, "0");
   const minutes = String(
@@ -103,12 +115,42 @@ export function StorefrontHome({
   }
 
   function addToCart(product: StoreProduct) {
+    if (!isUuidCartProductId(product.id)) {
+      showToast("Preview products cannot be purchased. Please try again shortly.");
+      return;
+    }
+
     addProductToLocalCart(product);
     window.dispatchEvent(new CustomEvent("talomart:open-cart"));
     showToast(`${product.name.split(" ").slice(0, 4).join(" ")} added to cart`);
+    void persistCartAddition(product.id).catch(() => {
+      showToast("Saved on this device. Server cart sync is unavailable.");
+    });
+  }
+
+  async function buyNow(product: StoreProduct) {
+    if (!isUuidCartProductId(product.id)) {
+      showToast("Preview products cannot be purchased. Please try again shortly.");
+      return;
+    }
+
+    addProductToLocalCart(product);
+
+    try {
+      await persistCartAddition(product.id);
+    } catch {
+      // The checkout page can still hydrate the locally stored cart.
+    }
+
+    router.push("/checkout");
   }
 
   async function toggleWishlist(productId: string) {
+    if (!isUuidCartProductId(productId)) {
+      showToast("Preview products cannot be saved.");
+      return;
+    }
+
     const saved = await toggleSavedProduct(productId);
     showToast(saved ? "Saved to your wishlist" : "Removed from wishlist");
   }
@@ -333,6 +375,17 @@ export function StorefrontHome({
             </button>
           </div>
 
+          {hasPreviewProducts && (
+            <div
+              className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900"
+              role="status"
+            >
+              The live catalogue is temporarily unavailable. These preview
+              products are visible for browsing only and cannot be purchased
+              or saved.
+            </div>
+          )}
+
           <div className="shop-toolbar" aria-label="Product filters">
             <div className="results-summary">
               <strong>
@@ -385,7 +438,11 @@ export function StorefrontHome({
                   onClick={() => toggleWishlist(product.id)}
                   aria-label={`${isSaved(product.id) ? "Remove" : "Save"} ${product.name} ${isSaved(product.id) ? "from" : "to"} wishlist`}
                   aria-pressed={isSaved(product.id)}
-                  disabled={!wishlistReady || pendingWishlistIds.has(product.id)}
+                  disabled={
+                    !isUuidCartProductId(product.id) ||
+                    !wishlistReady ||
+                    pendingWishlistIds.has(product.id)
+                  }
                 >
                   <Heart />
                 </button>
@@ -397,7 +454,9 @@ export function StorefrontHome({
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={product.image} alt={product.name} />
                   <span className="product-stock">
-                    {product.stock > 5
+                    {!isUuidCartProductId(product.id)
+                      ? "Preview only"
+                      : product.stock > 5
                       ? "In stock"
                       : `Only ${product.stock} left`}
                   </span>
@@ -417,28 +476,26 @@ export function StorefrontHome({
                   </div>
                 </div>
                 <div className="home-product-actions">
-                  <form action="/api/cart" method="post">
-                    <input type="hidden" name="productId" value={product.id} />
-                    <input type="hidden" name="quantity" value="1" />
-                    <input type="hidden" name="next" value="/cart" />
-                    <button
-                      className="add-button"
-                      aria-label={`Add ${product.name} to cart`}
-                    >
-                      Add to cart
-                    </button>
-                  </form>
-                  <form action="/api/cart" method="post">
-                    <input type="hidden" name="productId" value={product.id} />
-                    <input type="hidden" name="quantity" value="1" />
-                    <input type="hidden" name="next" value="/checkout" />
-                    <button
-                      className="buy-button"
-                      aria-label={`Buy ${product.name} now`}
-                    >
-                      Buy now
-                    </button>
-                  </form>
+                  <button
+                    type="button"
+                    className="add-button"
+                    onClick={() => addToCart(product)}
+                    aria-label={`Add ${product.name} to cart`}
+                    disabled={!isUuidCartProductId(product.id)}
+                  >
+                    {isUuidCartProductId(product.id)
+                      ? "Add to cart"
+                      : "Unavailable"}
+                  </button>
+                  <button
+                    type="button"
+                    className="buy-button"
+                    onClick={() => void buyNow(product)}
+                    aria-label={`Buy ${product.name} now`}
+                    disabled={!isUuidCartProductId(product.id)}
+                  >
+                    {isUuidCartProductId(product.id) ? "Buy now" : "Preview"}
+                  </button>
                 </div>
               </article>
             ))}
@@ -550,14 +607,20 @@ export function StorefrontHome({
                   ))}
                 </ul>
                 <div className="stock-status">
-                  {selectedProduct.stock} units available
+                  {isUuidCartProductId(selectedProduct.id)
+                    ? `${selectedProduct.stock} units available`
+                    : "Preview only · purchasing temporarily unavailable"}
                 </div>
                 <div className="detail-actions">
                   <button
                     className="primary-button"
                     onClick={() => addToCart(selectedProduct)}
+                    disabled={!isUuidCartProductId(selectedProduct.id)}
                   >
-                    <ShoppingBag /> Add to cart
+                    <ShoppingBag />{" "}
+                    {isUuidCartProductId(selectedProduct.id)
+                      ? "Add to cart"
+                      : "Unavailable"}
                   </button>
                   <button
                     type="button"
@@ -565,7 +628,11 @@ export function StorefrontHome({
                     onClick={() => toggleWishlist(selectedProduct.id)}
                     aria-label={`${isSaved(selectedProduct.id) ? "Remove" : "Save"} ${selectedProduct.name} ${isSaved(selectedProduct.id) ? "from" : "to"} wishlist`}
                     aria-pressed={isSaved(selectedProduct.id)}
-                    disabled={!wishlistReady || pendingWishlistIds.has(selectedProduct.id)}
+                    disabled={
+                      !isUuidCartProductId(selectedProduct.id) ||
+                      !wishlistReady ||
+                      pendingWishlistIds.has(selectedProduct.id)
+                    }
                   >
                     <Heart />
                   </button>

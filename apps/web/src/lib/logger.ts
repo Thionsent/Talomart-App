@@ -8,7 +8,9 @@ export const logger = pino({
       "authorization",
       "req.headers.authorization",
       "consumerSecret",
-      "passkey"
+      "passkey",
+      "token",
+      "resetUrl"
     ],
     censor: "[REDACTED]"
   }

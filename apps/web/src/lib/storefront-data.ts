@@ -35,7 +35,7 @@ export async function getStorefrontData(): Promise<{
   }
 
   try {
-    const [categories, products] = await withTimeout(
+    const queryResult = await withTimeout(
       Promise.all([
         sql<
           {
@@ -93,8 +93,19 @@ export async function getStorefrontData(): Promise<{
       ]),
       { label: "Storefront catalogue" }
     );
+    const categories = queryResult?.[0] ?? null;
+    const products = queryResult?.[1] ?? null;
 
-    if (!categories.length || !products.length) {
+    // A transient database/proxy failure can resolve a query as null rather
+    // than throwing. Treat that exactly like an unavailable catalogue so the
+    // storefront still renders its resilient fallback instead of crashing
+    // while destructuring or mapping the result.
+    if (
+      !Array.isArray(categories) ||
+      !Array.isArray(products) ||
+      !categories.length ||
+      !products.length
+    ) {
       logFallback(
         "Storefront catalogue returned no active categories or products",
         new Error("Empty catalogue result")

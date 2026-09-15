@@ -16,6 +16,7 @@
     "db:seed": "tsx --env-file-if-exists=../../.env src/seed.ts",
     "db:check": "tsx --env-file-if-exists=../../.env src/check.ts",
     "db:studio": "drizzle-kit studio",
+    "mpesa:sandbox:product": "tsx --env-file-if-exists=../../.env src/manage-mpesa-sandbox-product.ts",
     "user:promote-admin": "tsx --env-file-if-exists=../../.env src/promote-admin.ts"
   },
   "dependencies": {

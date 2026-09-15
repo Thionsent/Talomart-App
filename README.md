@@ -72,6 +72,18 @@ npm run dev
 Open `http://localhost:3000`.
 
 See [docs/supabase-setup.md](docs/supabase-setup.md) for the detailed Supabase setup checklist.
+Use the [configuration and security runbook](docs/configuration-security-runbook.md)
+for environment promotion, credential rotation, MFA, staff permissions, audit
+verification and dependency-security release gates.
+
+Before enabling real customer orders, work through the
+[market-readiness roadmap](docs/market-readiness-roadmap.md). It records the
+security, payment, operations, compliance and release gates for the controlled
+pilot and public launch.
+
+For payment testing, start with the
+[M-Pesa sandbox guide](docs/mpesa-sandbox-testing.md) and verify credentials
+with `npm run mpesa:sandbox:check` before placing a sandbox checkout.
 
 ## Optional background processing
 

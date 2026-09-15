@@ -22,7 +22,8 @@ import { useState } from "react";
 import {
   adminSignIn,
   customerSignIn,
-  customerSignUp
+  customerSignUp,
+  customerGoogleSignIn
 } from "@/app/auth-actions";
 import { AuthSubmitButton } from "@/components/auth/auth-submit-button";
 import { customerAuthHref } from "@/lib/auth-redirect";
@@ -45,7 +46,8 @@ const errorMessages: Record<string, string> = {
   "staff-account":
     "This is a staff account. Use the separate Talomart admin sign-in portal.",
   "staff-only":
-    "That account is a customer account. Use a staff or administrator account for this portal."
+    "That account is a customer account. Use a staff or administrator account for this portal.",
+  "google-sign-in": "Google sign-in is temporarily unavailable. Try email and password instead."
 };
 
 function destinationMessage(destination: string) {
@@ -167,11 +169,13 @@ export function AuthForm({
   mode,
   audience = "customer",
   error,
+  notice,
   destination = "/account"
 }: {
   mode: AuthMode;
   audience?: AuthAudience | undefined;
   error?: string | undefined;
+  notice?: string | undefined;
   destination?: string | undefined;
 }) {
   const isSignUp = mode === "sign-up";
@@ -195,7 +199,7 @@ export function AuthForm({
   const benefits = isSignUp
     ? [
         { icon: ShoppingBag, title: "Faster checkout", body: "Reuse your account details on future orders." },
-        { icon: Heart, title: "Keep every favourite", body: "Your guest wishlist merges into your new account." },
+        { icon: Heart, title: "Keep every favourite", body: "Your saved products stay private to the account that saved them." },
         { icon: PackageCheck, title: "Orders in one place", body: "Follow purchases and delivery progress easily." }
       ]
     : [
@@ -251,6 +255,13 @@ export function AuthForm({
           <div className="auth-return-notice">
             <CheckCircle2 />
             <span>{destinationMessage(destination)}</span>
+          </div>
+        )}
+
+        {notice && (
+          <div className="auth-return-notice" role="status" aria-live="polite">
+            <CheckCircle2 />
+            <span>{notice}</span>
           </div>
         )}
 
@@ -342,7 +353,7 @@ export function AuthForm({
         ) : (
           <div className="auth-form-options">
             <label><input type="checkbox" name="rememberMe" defaultChecked /> Keep me signed in</label>
-            <span>Secure customer access</span>
+            <Link href="/forgot-password">Forgot password?</Link>
           </div>
         )}
 
@@ -352,6 +363,17 @@ export function AuthForm({
           label={isSignUp ? "Create account" : "Sign in securely"}
           pendingLabel={isSignUp ? "Creating your account…" : "Signing you in…"}
         />
+
+        {!isSignUp && (
+          <button
+            type="submit"
+            formAction={customerGoogleSignIn}
+            formNoValidate
+            className="auth-guest-button mt-3 w-full justify-center"
+          >
+            Continue with Google
+          </button>
+        )}
 
         <p className="auth-alternate">
           {isSignUp ? "Already have an account?" : "New to Talomart?"}{" "}

@@ -18,6 +18,9 @@ Docker Desktop is optional. Use it only if you want a local PostgreSQL/Redis fal
 - Supabase Storage bucket for product images, or another approved object storage provider.
 - Safaricom Daraja developer account and sandbox application.
 - Transactional email account such as Resend.
+- Verified transactional-email sending domain and an `EMAIL_FROM` address on
+  that domain. Customer password recovery cannot deliver links until both the
+  provider API key and verified sender are configured.
 - SMS provider account if order updates will be sent by SMS.
 - Error monitoring project such as Sentry.
 - Domain name and DNS access.
@@ -37,3 +40,11 @@ Docker Desktop is optional. Use it only if you want a local PostgreSQL/Redis fal
 - Reconciliation and refund operating procedure.
 
 Place local values in `.env`. Place staging and production values in the hosting provider's encrypted secret manager.
+
+## Customer password recovery
+
+Talomart uses Better Auth's single-use password-reset verification records and
+Resend for delivery. Reset links expire after one hour. Configure
+`RESEND_API_KEY`, `EMAIL_FROM` and the public `NEXT_PUBLIC_APP_URL` before
+testing recovery outside local development. A successful reset revokes the
+customer's existing sessions.

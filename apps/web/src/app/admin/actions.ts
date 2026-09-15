@@ -2,11 +2,28 @@
 
 import { sql } from "@talomart/db";
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { z } from "zod";
 
-import { adminAuth } from "@/lib/auth";
+import {
+  requireAdminPermission,
+  type StaffPermission
+} from "@/lib/admin-authorization";
+import { recordAdminAudit } from "@/lib/admin-audit";
+import { serializeDatabaseJson } from "@/lib/database-json";
+import {
+  enqueueOrderEmail,
+  processPendingTransactionalEmails,
+  type OrderEmailType
+} from "@/lib/email";
+import {
+  assertOrderStatusTransition,
+  fulfillmentStatusValues,
+  orderStatusForFulfillment,
+  type OrderStatus
+} from "@/lib/order-status";
+import { recordOrderStatusTransition } from "@/lib/order-status-history";
 import { parseCsv, specificationsFromCsv } from "@/lib/product-bulk-csv";
 import { uploadAdminImageFromForm } from "@/lib/supabase-storage";
 
@@ -29,17 +46,19 @@ const paymentStatuses = [
   "refunded"
 ] as const;
 
-async function requireAdmin() {
-  const session = await adminAuth.api.getSession({
-    headers: await headers()
-  });
-  const role = (session?.user as { role?: string } | undefined)?.role;
+async function requireAdmin(permission: StaffPermission) {
+  return requireAdminPermission(permission, { mutation: true });
+}
 
-  if (!session || (role !== "admin" && role !== "staff")) {
-    throw new Error("You do not have permission to manage Talomart operations.");
-  }
+function emailTypeForOrderStatus(status: OrderStatus): OrderEmailType | null {
+  if (status === "out_for_delivery") return "order_dispatched";
+  if (status === "delivered") return "order_delivered";
+  if (status === "cancelled") return "order_cancelled";
+  return null;
+}
 
-  return session.user.id;
+function scheduleEmailDelivery() {
+  after(() => processPendingTransactionalEmails());
 }
 
 function finish(section: string, notice: string) {
@@ -327,7 +346,7 @@ async function csvTextFromForm(formData: FormData) {
 }
 
 export async function createProduct(formData: FormData) {
-  await requireAdmin();
+  const actor = await requireAdmin("catalog.manage");
   try {
   const product = await productFromForm(formData);
 
@@ -360,7 +379,7 @@ export async function createProduct(formData: FormData) {
       ${product.lowStockThreshold},
       ${product.isActive},
       ${product.isFeatured},
-      ${sql.json(product.specifications)}::jsonb
+      ${serializeDatabaseJson(product.specifications)}::jsonb
     )
     returning id::text
   `;
@@ -373,6 +392,20 @@ export async function createProduct(formData: FormData) {
     `;
   }
 
+  await recordAdminAudit(sql, actor, {
+    action: "product.create",
+    resourceType: "product",
+    resourceId: created?.id ?? null,
+    summary: `Created product ${product.sku}`,
+    after: {
+      sku: product.sku,
+      name: product.name,
+      priceMinor: product.priceMinor,
+      stockQuantity: product.stockQuantity,
+      isActive: product.isActive
+    }
+  });
+
   revalidatePath("/admin");
   revalidatePath("/");
   revalidatePath("/products");
@@ -384,7 +417,7 @@ export async function createProduct(formData: FormData) {
 }
 
 export async function updateProduct(formData: FormData) {
-  await requireAdmin();
+  const actor = await requireAdmin("catalog.manage");
   try {
   const productId = z.string().uuid().parse(text(formData, "productId"));
   const product = await productFromForm(formData);
@@ -404,7 +437,7 @@ export async function updateProduct(formData: FormData) {
       low_stock_threshold = ${product.lowStockThreshold},
       is_active = ${product.isActive},
       is_featured = ${product.isFeatured},
-      specifications = ${sql.json(product.specifications)}::jsonb,
+      specifications = ${serializeDatabaseJson(product.specifications)}::jsonb,
       updated_at = now()
     where id = ${productId}::uuid
   `;
@@ -418,6 +451,20 @@ export async function updateProduct(formData: FormData) {
     `;
   }
 
+  await recordAdminAudit(sql, actor, {
+    action: "product.update",
+    resourceType: "product",
+    resourceId: productId,
+    summary: `Updated product ${product.sku}`,
+    after: {
+      sku: product.sku,
+      name: product.name,
+      priceMinor: product.priceMinor,
+      stockQuantity: product.stockQuantity,
+      isActive: product.isActive
+    }
+  });
+
   revalidatePath("/admin");
   revalidatePath("/");
   revalidatePath("/products");
@@ -430,7 +477,7 @@ export async function updateProduct(formData: FormData) {
 }
 
 export async function archiveProduct(formData: FormData) {
-  await requireAdmin();
+  const actor = await requireAdmin("catalog.manage");
   try {
   const productId = z.string().uuid().parse(text(formData, "productId"));
 
@@ -439,6 +486,14 @@ export async function archiveProduct(formData: FormData) {
     set is_active = false, is_featured = false, updated_at = now()
     where id = ${productId}::uuid
   `;
+
+  await recordAdminAudit(sql, actor, {
+    action: "product.archive",
+    resourceType: "product",
+    resourceId: productId,
+    summary: "Archived a product",
+    after: { isActive: false, isFeatured: false }
+  });
 
   revalidatePath("/admin");
   revalidatePath("/");
@@ -451,7 +506,8 @@ export async function archiveProduct(formData: FormData) {
 }
 
 export async function bulkImportProducts(formData: FormData) {
-  const actorId = await requireAdmin();
+  const actor = await requireAdmin("catalog.manage");
+  const actorId = actor.id;
 
   try {
     const mode = z.enum(bulkImportModes).parse(text(formData, "mode") || "upsert");
@@ -600,7 +656,7 @@ export async function bulkImportProducts(formData: FormData) {
               low_stock_threshold = ${product.lowStockThreshold},
               is_active = ${product.isActive},
               is_featured = ${product.isFeatured},
-              specifications = ${sql.json(product.specifications)}::jsonb,
+              specifications = ${serializeDatabaseJson(product.specifications)}::jsonb,
               updated_at = now()
             where id = ${existing.id}::uuid
           `;
@@ -667,7 +723,7 @@ export async function bulkImportProducts(formData: FormData) {
               ${product.lowStockThreshold},
               ${product.isActive},
               ${product.isFeatured},
-              ${sql.json(product.specifications)}::jsonb
+              ${serializeDatabaseJson(product.specifications)}::jsonb
             )
             returning id::text
           `;
@@ -707,6 +763,13 @@ export async function bulkImportProducts(formData: FormData) {
           created += 1;
         }
       }
+    });
+
+    await recordAdminAudit(sql, actor, {
+      action: "product.bulk_import",
+      resourceType: "product_batch",
+      summary: `Bulk import: ${created} created, ${updated} updated, ${skipped} skipped`,
+      after: { mode, created, updated, skipped, submittedRows: rows.length }
     });
 
     revalidatePath("/admin");
@@ -759,11 +822,11 @@ async function categoryFromForm(formData: FormData) {
 }
 
 export async function createCategory(formData: FormData) {
-  await requireAdmin();
+  const actor = await requireAdmin("catalog.manage");
   try {
   const category = await categoryFromForm(formData);
 
-  await sql`
+  const [created] = await sql<{ id: string }[]>`
     insert into categories (
       name,
       slug,
@@ -780,7 +843,16 @@ export async function createCategory(formData: FormData) {
       ${category.sortOrder},
       ${category.isActive}
     )
+    returning id::text
   `;
+
+  await recordAdminAudit(sql, actor, {
+    action: "category.create",
+    resourceType: "category",
+    resourceId: created?.id ?? null,
+    summary: `Created category ${category.name}`,
+    after: { name: category.name, slug: category.slug, isActive: category.isActive }
+  });
 
   revalidatePath("/admin");
   revalidatePath("/");
@@ -793,7 +865,7 @@ export async function createCategory(formData: FormData) {
 }
 
 export async function updateCategory(formData: FormData) {
-  await requireAdmin();
+  const actor = await requireAdmin("catalog.manage");
   try {
   const categoryId = z.string().uuid().parse(text(formData, "categoryId"));
   const category = await categoryFromForm(formData);
@@ -811,6 +883,14 @@ export async function updateCategory(formData: FormData) {
     where id = ${categoryId}::uuid
   `;
 
+  await recordAdminAudit(sql, actor, {
+    action: "category.update",
+    resourceType: "category",
+    resourceId: categoryId,
+    summary: `Updated category ${category.name}`,
+    after: { name: category.name, slug: category.slug, isActive: category.isActive }
+  });
+
   revalidatePath("/admin");
   revalidatePath("/");
   revalidatePath("/categories");
@@ -823,7 +903,7 @@ export async function updateCategory(formData: FormData) {
 }
 
 export async function archiveCategory(formData: FormData) {
-  await requireAdmin();
+  const actor = await requireAdmin("catalog.manage");
   try {
   const categoryId = z.string().uuid().parse(text(formData, "categoryId"));
 
@@ -832,6 +912,14 @@ export async function archiveCategory(formData: FormData) {
     set is_active = false, updated_at = now()
     where id = ${categoryId}::uuid
   `;
+
+  await recordAdminAudit(sql, actor, {
+    action: "category.archive",
+    resourceType: "category",
+    resourceId: categoryId,
+    summary: "Archived a category",
+    after: { isActive: false }
+  });
 
   revalidatePath("/admin");
   revalidatePath("/");
@@ -844,7 +932,8 @@ export async function archiveCategory(formData: FormData) {
 }
 
 export async function adjustInventory(formData: FormData) {
-  const actorId = await requireAdmin();
+  const actor = await requireAdmin("inventory.manage");
+  const actorId = actor.id;
   const returnSection =
     text(formData, "returnSection") === "low-stock" ? "low-stock" : "inventory";
   try {
@@ -892,6 +981,19 @@ export async function adjustInventory(formData: FormData) {
         ${actorId}
       )
     `;
+
+    await recordAdminAudit(transaction as unknown as typeof sql, actor, {
+      action: "inventory.adjust",
+      resourceType: "product",
+      resourceId: productId,
+      summary: `Adjusted inventory by ${delta}`,
+      after: {
+        quantityChange: delta,
+        stockQuantity: updated.stockQuantity,
+        reservedQuantity: updated.reservedQuantity,
+        reason
+      }
+    });
   });
 
   revalidatePath("/admin");
@@ -904,18 +1006,187 @@ export async function adjustInventory(formData: FormData) {
   finish(returnSection, "Inventory movement recorded.");
 }
 
+async function applyOrderStatusTransition(
+  runner: typeof sql,
+  input: {
+    orderId: string;
+    orderNumber: string;
+    currentStatus: OrderStatus;
+    nextStatus: OrderStatus;
+    actorId: string;
+    source: "admin" | "fulfillment";
+    reason?: string | null;
+  }
+) {
+  assertOrderStatusTransition(input.currentStatus, input.nextStatus);
+  if (input.currentStatus === input.nextStatus) return;
+
+  const items = await runner<
+    { productId: string | null; quantity: number; productName: string }[]
+  >`
+    select
+      product_id::text as "productId",
+      quantity,
+      product_name as "productName"
+    from order_items
+    where order_id = ${input.orderId}::uuid
+  `;
+  const wasOpenReservation = ![
+    "delivered",
+    "cancelled",
+    "returned"
+  ].includes(input.currentStatus);
+  const shouldDeliver = input.nextStatus === "delivered";
+  const shouldRelease =
+    ["cancelled", "returned"].includes(input.nextStatus) &&
+    wasOpenReservation;
+  const shouldReturnDelivered =
+    input.nextStatus === "returned" && input.currentStatus === "delivered";
+
+  for (const item of items) {
+    if (!item.productId) continue;
+
+    if (shouldDeliver) {
+      const [product] = await runner<
+        { stockQuantity: number; reservedQuantity: number }[]
+      >`
+        update products
+        set
+          stock_quantity = stock_quantity - ${item.quantity},
+          reserved_quantity = greatest(reserved_quantity - ${item.quantity}, 0),
+          updated_at = now()
+        where id = ${item.productId}::uuid
+          and stock_quantity >= ${item.quantity}
+        returning
+          stock_quantity as "stockQuantity",
+          reserved_quantity as "reservedQuantity"
+      `;
+
+      if (!product) {
+        throw new Error(
+          `Unable to fulfil ${item.productName}; stock is too low.`
+        );
+      }
+
+      await runner`
+        insert into inventory_movements (
+          product_id, order_id, type, quantity, balance_after, reason, actor_id
+        ) values (
+          ${item.productId}::uuid,
+          ${input.orderId}::uuid,
+          'sale',
+          ${item.quantity},
+          ${product.stockQuantity - product.reservedQuantity},
+          ${`Delivered order ${input.orderNumber}`},
+          ${input.actorId}
+        )
+      `;
+    }
+
+    if (shouldRelease) {
+      const [product] = await runner<
+        { stockQuantity: number; reservedQuantity: number }[]
+      >`
+        update products
+        set
+          reserved_quantity = greatest(reserved_quantity - ${item.quantity}, 0),
+          updated_at = now()
+        where id = ${item.productId}::uuid
+        returning
+          stock_quantity as "stockQuantity",
+          reserved_quantity as "reservedQuantity"
+      `;
+
+      if (product) {
+        await runner`
+          insert into inventory_movements (
+            product_id, order_id, type, quantity, balance_after, reason, actor_id
+          ) values (
+            ${item.productId}::uuid,
+            ${input.orderId}::uuid,
+            'release',
+            ${item.quantity},
+            ${product.stockQuantity - product.reservedQuantity},
+            ${`Released reservation for order ${input.orderNumber}`},
+            ${input.actorId}
+          )
+        `;
+      }
+    }
+
+    if (shouldReturnDelivered) {
+      const [product] = await runner<
+        { stockQuantity: number; reservedQuantity: number }[]
+      >`
+        update products
+        set stock_quantity = stock_quantity + ${item.quantity}, updated_at = now()
+        where id = ${item.productId}::uuid
+        returning
+          stock_quantity as "stockQuantity",
+          reserved_quantity as "reservedQuantity"
+      `;
+
+      if (product) {
+        await runner`
+          insert into inventory_movements (
+            product_id, order_id, type, quantity, balance_after, reason, actor_id
+          ) values (
+            ${item.productId}::uuid,
+            ${input.orderId}::uuid,
+            'return',
+            ${item.quantity},
+            ${product.stockQuantity - product.reservedQuantity},
+            ${`Returned order ${input.orderNumber}`},
+            ${input.actorId}
+          )
+        `;
+      }
+    }
+  }
+
+  await runner`
+    update orders
+    set status = ${input.nextStatus}, updated_at = now()
+    where id = ${input.orderId}::uuid
+  `;
+
+  await recordOrderStatusTransition(runner, {
+    orderId: input.orderId,
+    previousStatus: input.currentStatus,
+    nextStatus: input.nextStatus,
+    source: input.source,
+    reason: input.reason ?? null,
+    actorId: input.actorId
+  });
+
+  await recordOrderEvent(runner, {
+    orderId: input.orderId,
+    actorId: input.actorId,
+    type: "order_status_changed",
+    audience: "customer",
+    payload: {
+      orderNumber: input.orderNumber,
+      previousStatus: input.currentStatus,
+      nextStatus: input.nextStatus,
+      source: input.source,
+      reason: input.reason ?? null
+    }
+  });
+}
+
 const fulfillmentSchema = z.object({
   orderId: z.string().uuid(),
   courierName: z.string().trim().min(2).max(120),
   trackingNumber: z.string().trim().max(120).nullable(),
   status: z
-    .enum(["processing", "packed", "shipped", "out_for_delivery", "delivered", "returned"])
+    .enum(fulfillmentStatusValues)
     .default("processing"),
   notes: z.string().trim().max(500).nullable()
 });
 
 export async function createFulfillment(formData: FormData) {
-  const actorId = await requireAdmin();
+  const actor = await requireAdmin("orders.manage");
+  const actorId = actor.id;
   try {
   const fulfillment = fulfillmentSchema.parse({
     orderId: text(formData, "orderId"),
@@ -926,6 +1197,53 @@ export async function createFulfillment(formData: FormData) {
   });
 
   await sql.begin(async (transaction) => {
+    const runner = transaction as unknown as typeof sql;
+    const [order] = await transaction<
+      {
+        orderNumber: string;
+        status: OrderStatus;
+        paymentMethod: "mpesa" | "cash_on_delivery";
+        paymentStatus: (typeof paymentStatuses)[number];
+      }[]
+    >`
+      select
+        o.order_number as "orderNumber",
+        o.status,
+        o.payment_method as "paymentMethod",
+        coalesce(p.status, 'pending') as "paymentStatus"
+      from orders o
+      left join lateral (
+        select status
+        from payments
+        where order_id = o.id
+        order by created_at desc
+        limit 1
+      ) p on true
+      where o.id = ${fulfillment.orderId}::uuid
+      for update of o
+    `;
+    if (!order) throw new Error("Order not found.");
+
+    const synchronizedStatus = orderStatusForFulfillment(fulfillment.status);
+    if (
+      order.paymentMethod === "mpesa" &&
+      order.paymentStatus !== "paid" &&
+      synchronizedStatus !== order.status
+    ) {
+      throw new Error(
+        "Wait for Daraja to confirm this M-Pesa payment before progressing fulfilment."
+      );
+    }
+
+    await applyOrderStatusTransition(runner, {
+      orderId: fulfillment.orderId,
+      orderNumber: order.orderNumber,
+      currentStatus: order.status,
+      nextStatus: synchronizedStatus,
+      actorId,
+      source: "fulfillment"
+    });
+
     await transaction`
       insert into fulfillments (
         order_id,
@@ -955,7 +1273,7 @@ export async function createFulfillment(formData: FormData) {
       )
     `;
 
-    await recordOrderEvent(transaction as unknown as typeof sql, {
+    await recordOrderEvent(runner, {
       orderId: fulfillment.orderId,
       actorId,
       type: "fulfillment_updated",
@@ -966,9 +1284,33 @@ export async function createFulfillment(formData: FormData) {
         trackingNumber: fulfillment.trackingNumber
       }
     });
+
+    const emailType = emailTypeForOrderStatus(synchronizedStatus);
+    if (emailType) {
+      await enqueueOrderEmail(runner, {
+        orderId: fulfillment.orderId,
+        type: emailType
+      });
+    }
+
+    await recordAdminAudit(runner, actor, {
+      action: "fulfillment.create",
+      resourceType: "order",
+      resourceId: fulfillment.orderId,
+      summary: `Added ${fulfillment.status} fulfillment record`,
+      after: {
+        courierName: fulfillment.courierName,
+        trackingNumber: fulfillment.trackingNumber,
+        status: fulfillment.status
+      }
+    });
   });
 
+  scheduleEmailDelivery();
+
   revalidatePath("/admin");
+  revalidatePath("/account");
+  revalidatePath("/track");
   } catch (error) {
     fail("orders", error);
   }
@@ -977,7 +1319,8 @@ export async function createFulfillment(formData: FormData) {
 }
 
 export async function confirmCodPayment(formData: FormData) {
-  const actorId = await requireAdmin();
+  const actor = await requireAdmin("orders.manage");
+  const actorId = actor.id;
 
   try {
     const orderId = z.string().uuid().parse(text(formData, "orderId"));
@@ -999,7 +1342,13 @@ export async function confirmCodPayment(formData: FormData) {
           o.payment_method as "paymentMethod",
           coalesce(p.status, 'pending') as "paymentStatus"
         from orders o
-        left join payments p on p.order_id = o.id
+        left join lateral (
+          select status
+          from payments
+          where order_id = o.id
+          order by created_at desc
+          limit 1
+        ) p on true
         where o.id = ${orderId}::uuid
         for update of o
       `;
@@ -1035,7 +1384,23 @@ export async function confirmCodPayment(formData: FormData) {
           message: "Cash on Delivery payment was manually confirmed by admin."
         }
       });
+
+      await enqueueOrderEmail(transaction as unknown as typeof sql, {
+        orderId,
+        type: "payment_confirmed"
+      });
+
+      await recordAdminAudit(transaction as unknown as typeof sql, actor, {
+        action: "payment.confirm_cod",
+        resourceType: "order",
+        resourceId: orderId,
+        summary: `Confirmed COD payment for ${order.orderNumber}`,
+        before: { paymentStatus: order.paymentStatus },
+        after: { paymentStatus: "paid" }
+      });
     });
+
+    scheduleEmailDelivery();
 
     revalidatePath("/admin");
     revalidatePath("/account");
@@ -1048,7 +1413,8 @@ export async function confirmCodPayment(formData: FormData) {
 }
 
 export async function cancelOrder(formData: FormData) {
-  const actorId = await requireAdmin();
+  const actor = await requireAdmin("orders.manage");
+  const actorId = actor.id;
 
   try {
     const orderId = z.string().uuid().parse(text(formData, "orderId"));
@@ -1102,6 +1468,18 @@ export async function cancelOrder(formData: FormData) {
         where id = ${orderId}::uuid
       `;
 
+      await recordOrderStatusTransition(
+        transaction as unknown as typeof sql,
+        {
+          orderId,
+          previousStatus: order.status,
+          nextStatus: "cancelled",
+          source: "admin",
+          reason,
+          actorId
+        }
+      );
+
       await transaction`
         update payments
         set
@@ -1123,7 +1501,26 @@ export async function cancelOrder(formData: FormData) {
           reason
         }
       });
+
+      await enqueueOrderEmail(transaction as unknown as typeof sql, {
+        orderId,
+        type: "order_cancelled"
+      });
+
+      await recordAdminAudit(transaction as unknown as typeof sql, actor, {
+        action: "order.cancel",
+        resourceType: "order",
+        resourceId: orderId,
+        summary: `Cancelled ${order.orderNumber}`,
+        before: {
+          orderStatus: order.status,
+          paymentStatus: order.paymentStatus
+        },
+        after: { orderStatus: "cancelled", paymentStatus: "failed", reason }
+      });
     });
+
+    scheduleEmailDelivery();
 
     revalidatePath("/admin");
     revalidatePath("/account");
@@ -1137,11 +1534,13 @@ export async function cancelOrder(formData: FormData) {
 }
 
 export async function updateOrder(formData: FormData) {
-  const actorId = await requireAdmin();
+  const actor = await requireAdmin("orders.manage");
+  const actorId = actor.id;
   try {
   const orderId = z.string().uuid().parse(text(formData, "orderId"));
   const status = z.enum(orderStatuses).parse(text(formData, "status"));
   const paymentStatus = z.enum(paymentStatuses).parse(text(formData, "paymentStatus"));
+  const changeReason = nullableText(formData, "changeReason");
 
   await sql.begin(async (transaction) => {
     const [order] = await transaction<
@@ -1154,13 +1553,19 @@ export async function updateOrder(formData: FormData) {
       }[]
     >`
       select
-        id::text,
+        o.id::text,
         order_number as "orderNumber",
         o.status as "currentStatus",
         o.payment_method as "paymentMethod",
         coalesce(p.status, 'pending') as "currentPaymentStatus"
       from orders o
-      left join payments p on p.order_id = o.id
+      left join lateral (
+        select status
+        from payments
+        where order_id = o.id
+        order by created_at desc
+        limit 1
+      ) p on true
       where o.id = ${orderId}::uuid
       for update of o
     `;
@@ -1171,162 +1576,63 @@ export async function updateOrder(formData: FormData) {
       throw new Error("Cancelled orders cannot be updated. Create a new order instead.");
     }
 
+    if (status === "cancelled") {
+      throw new Error(
+        "Use the dedicated cancellation control so the reason and stock release are recorded."
+      );
+    }
+
+    if (
+      ((status === "returned" && status !== order.currentStatus) ||
+        (paymentStatus === "refunded" &&
+          paymentStatus !== order.currentPaymentStatus)) &&
+      (!changeReason || changeReason.length < 5)
+    ) {
+      throw new Error(
+        "Enter a reason of at least 5 characters for a return or refund."
+      );
+    }
+
+    assertOrderStatusTransition(order.currentStatus, status);
+
+    if (
+      order.paymentMethod === "mpesa" &&
+      paymentStatus !== order.currentPaymentStatus
+    ) {
+      throw new Error(
+        "M-Pesa payment status is controlled by Daraja and cannot be changed manually."
+      );
+    }
+
+    if (
+      order.paymentMethod === "mpesa" &&
+      order.currentPaymentStatus !== "paid" &&
+      status !== order.currentStatus
+    ) {
+      throw new Error(
+        "Wait for Daraja to confirm this M-Pesa payment before progressing the order."
+      );
+    }
+
     if (
       order.paymentMethod === "cash_on_delivery" &&
       paymentStatus === "paid" &&
-      status !== "delivered"
+      paymentStatus !== order.currentPaymentStatus
     ) {
-      throw new Error("Mark a COD order as delivered before confirming payment collection.");
+      throw new Error(
+        "Save the order as delivered first, then use Mark COD as paid after collecting the cash."
+      );
     }
 
-    const items = await transaction<
-      { productId: string | null; quantity: number; productName: string }[]
-    >`
-      select
-        product_id::text as "productId",
-        quantity,
-        product_name as "productName"
-      from order_items
-      where order_id = ${orderId}::uuid
-    `;
-
-    const wasOpenReservation = ![
-      "delivered",
-      "cancelled",
-      "returned"
-    ].includes(order.currentStatus);
-    const shouldDeliver = status === "delivered" && order.currentStatus !== "delivered";
-    const shouldRelease = ["cancelled", "returned"].includes(status) && wasOpenReservation;
-    const shouldReturnDelivered =
-      status === "returned" && order.currentStatus === "delivered";
-
-    for (const item of items) {
-      if (!item.productId) continue;
-
-      if (shouldDeliver) {
-        const [product] = await transaction<
-          { stockQuantity: number; reservedQuantity: number }[]
-        >`
-          update products
-          set
-            stock_quantity = stock_quantity - ${item.quantity},
-            reserved_quantity = greatest(reserved_quantity - ${item.quantity}, 0),
-            updated_at = now()
-          where id = ${item.productId}::uuid
-            and stock_quantity >= ${item.quantity}
-          returning
-            stock_quantity as "stockQuantity",
-            reserved_quantity as "reservedQuantity"
-        `;
-
-        if (!product) {
-          throw new Error(`Unable to fulfil ${item.productName}; stock is too low.`);
-        }
-
-        await transaction`
-          insert into inventory_movements (
-            product_id,
-            order_id,
-            type,
-            quantity,
-            balance_after,
-            reason,
-            actor_id
-          )
-          values (
-            ${item.productId}::uuid,
-            ${orderId}::uuid,
-            'sale',
-            ${item.quantity},
-            ${product.stockQuantity - product.reservedQuantity},
-            ${`Delivered order ${order.orderNumber}`},
-            ${actorId}
-          )
-        `;
-      }
-
-      if (shouldRelease) {
-        const [product] = await transaction<
-          { stockQuantity: number; reservedQuantity: number }[]
-        >`
-          update products
-          set
-            reserved_quantity = greatest(reserved_quantity - ${item.quantity}, 0),
-            updated_at = now()
-          where id = ${item.productId}::uuid
-          returning
-            stock_quantity as "stockQuantity",
-            reserved_quantity as "reservedQuantity"
-        `;
-
-        if (product) {
-          await transaction`
-            insert into inventory_movements (
-              product_id,
-              order_id,
-              type,
-              quantity,
-              balance_after,
-              reason,
-              actor_id
-            )
-            values (
-              ${item.productId}::uuid,
-              ${orderId}::uuid,
-              'release',
-              ${item.quantity},
-              ${product.stockQuantity - product.reservedQuantity},
-              ${`Released reservation for order ${order.orderNumber}`},
-              ${actorId}
-            )
-          `;
-        }
-      }
-
-      if (shouldReturnDelivered) {
-        const [product] = await transaction<
-          { stockQuantity: number; reservedQuantity: number }[]
-        >`
-          update products
-          set
-            stock_quantity = stock_quantity + ${item.quantity},
-            updated_at = now()
-          where id = ${item.productId}::uuid
-          returning
-            stock_quantity as "stockQuantity",
-            reserved_quantity as "reservedQuantity"
-        `;
-
-        if (product) {
-          await transaction`
-            insert into inventory_movements (
-              product_id,
-              order_id,
-              type,
-              quantity,
-              balance_after,
-              reason,
-              actor_id
-            )
-            values (
-              ${item.productId}::uuid,
-              ${orderId}::uuid,
-              'return',
-              ${item.quantity},
-              ${product.stockQuantity - product.reservedQuantity},
-              ${`Returned order ${order.orderNumber}`},
-              ${actorId}
-            )
-          `;
-        }
-      }
-    }
-
-    await transaction`
-      update orders
-      set status = ${status}, updated_at = now()
-      where id = ${orderId}::uuid
-    `;
+    await applyOrderStatusTransition(transaction as unknown as typeof sql, {
+      orderId,
+      orderNumber: order.orderNumber,
+      currentStatus: order.currentStatus,
+      nextStatus: status,
+      actorId,
+      source: "admin",
+      reason: changeReason
+    });
 
     await transaction`
       update payments
@@ -1340,20 +1646,6 @@ export async function updateOrder(formData: FormData) {
         updated_at = now()
       where order_id = ${orderId}::uuid
     `;
-
-    if (order.currentStatus !== status) {
-      await recordOrderEvent(transaction as unknown as typeof sql, {
-        orderId,
-        actorId,
-        type: "order_status_changed",
-        audience: "customer",
-        payload: {
-          orderNumber: order.orderNumber,
-          previousStatus: order.currentStatus,
-          nextStatus: status
-        }
-      });
-    }
 
     if (order.currentPaymentStatus !== paymentStatus) {
       await recordOrderEvent(transaction as unknown as typeof sql, {
@@ -1386,10 +1678,45 @@ export async function updateOrder(formData: FormData) {
         }
       });
     }
+
+    if (order.currentStatus !== status) {
+      const emailType = emailTypeForOrderStatus(status);
+      if (emailType) {
+        await enqueueOrderEmail(transaction as unknown as typeof sql, {
+          orderId,
+          type: emailType
+        });
+      }
+    }
+
+    if (
+      order.currentPaymentStatus !== paymentStatus &&
+      paymentStatus === "refunded"
+    ) {
+      await enqueueOrderEmail(transaction as unknown as typeof sql, {
+        orderId,
+        type: "payment_refunded"
+      });
+    }
+
+    await recordAdminAudit(transaction as unknown as typeof sql, actor, {
+      action: "order.update",
+      resourceType: "order",
+      resourceId: orderId,
+      summary: `Updated ${order.orderNumber}`,
+      before: {
+        orderStatus: order.currentStatus,
+        paymentStatus: order.currentPaymentStatus
+      },
+      after: { orderStatus: status, paymentStatus, reason: changeReason }
+    });
   });
+
+  scheduleEmailDelivery();
 
   revalidatePath("/admin");
   revalidatePath("/account");
+  revalidatePath("/track");
   } catch (error) {
     fail("orders", error);
   }

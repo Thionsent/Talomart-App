@@ -4,6 +4,7 @@ import { Heart, ShoppingBag, Star } from "lucide-react";
 import Link from "next/link";
 
 import type { CatalogueProduct } from "@/lib/catalog-queries";
+import { isUuidCartProductId } from "@/lib/cart-product-id";
 import { useWishlist } from "@/components/wishlist/wishlist-provider";
 
 const formatPrice = (value: number) =>
@@ -13,6 +14,7 @@ export function ProductCard({ product }: { product: CatalogueProduct }) {
   const { isSaved, toggle, ready, pendingIds } = useWishlist();
   const saved = isSaved(product.id);
   const pending = pendingIds.has(product.id);
+  const purchasable = isUuidCartProductId(product.id);
 
   return (
     <article className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:border-[var(--color-green)] hover:shadow-xl">
@@ -60,7 +62,9 @@ export function ProductCard({ product }: { product: CatalogueProduct }) {
           )}
         </div>
         <p className="text-xs font-bold text-slate-500">
-          {product.stock > 0
+          {!purchasable
+            ? "Preview only · temporarily unavailable"
+            : product.stock > 0
             ? `${product.stock} units available`
             : "Out of stock"}
         </p>
@@ -71,15 +75,16 @@ export function ProductCard({ product }: { product: CatalogueProduct }) {
             <input type="hidden" name="next" value="/cart" />
             <button
               className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[var(--color-green)] px-4 text-sm font-extrabold text-white transition hover:bg-[var(--color-green-dark)] disabled:opacity-50"
-              disabled={product.stock <= 0}
+              disabled={!purchasable || product.stock <= 0}
             >
-              <ShoppingBag className="h-4 w-4" /> Add to cart
+              <ShoppingBag className="h-4 w-4" />{" "}
+              {purchasable ? "Add to cart" : "Unavailable"}
             </button>
           </form>
           <button
             type="button"
             onClick={() => void toggle(product.id)}
-            disabled={!ready || pending}
+            disabled={!purchasable || !ready || pending}
             aria-pressed={saved}
             aria-label={`${saved ? "Remove" : "Save"} ${product.name} ${saved ? "from" : "to"} wishlist`}
             title={saved ? "Remove from wishlist" : "Save to wishlist"}
@@ -97,9 +102,9 @@ export function ProductCard({ product }: { product: CatalogueProduct }) {
             <input type="hidden" name="next" value="/checkout" />
             <button
               className="inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-[var(--color-orange)] bg-orange-50 px-4 text-sm font-extrabold text-[var(--color-orange)] transition hover:bg-[var(--color-orange)] hover:text-white disabled:opacity-50"
-              disabled={product.stock <= 0}
+              disabled={!purchasable || product.stock <= 0}
             >
-              Buy now
+              {purchasable ? "Buy now" : "Preview only"}
             </button>
           </form>
         </div>

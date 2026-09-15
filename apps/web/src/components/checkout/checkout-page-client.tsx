@@ -3,18 +3,35 @@
 import { CreditCard, Truck } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { CART_KEY, type LocalCartItem } from "@/lib/cart-storage";
+import {
+  clearLocalCart,
+  readLocalCart,
+  type LocalCartItem,
+  writeLocalCart
+} from "@/lib/cart-storage";
+import { getCheckoutErrorMessage } from "@/lib/checkout-error";
+import { isMpesaSandboxTestCart } from "@/lib/payments/mpesa-sandbox-product";
 const formatPrice = (value: number) =>
   new Intl.NumberFormat("en-KE").format(value);
 
 export function CheckoutPageClient({
+  cartScope,
   initialCart = [],
-  isAuthenticated = false
+  isAuthenticated = false,
+  initialEmail = "",
+  mpesaAvailable = false,
+  mpesaEnvironment = "sandbox",
+  mpesaUnavailableReason = null
 }: {
+  cartScope: string;
   initialCart?: LocalCartItem[];
   isAuthenticated?: boolean;
+  initialEmail?: string;
+  mpesaAvailable?: boolean;
+  mpesaEnvironment?: "sandbox" | "production";
+  mpesaUnavailableReason?: string | null;
 }) {
   const router = useRouter();
   const [cart, setCart] = useState<LocalCartItem[]>(initialCart);
@@ -23,24 +40,22 @@ export function CheckoutPageClient({
   const [paymentMethod, setPaymentMethod] = useState<
     "cash_on_delivery" | "mpesa"
   >("cash_on_delivery");
+  const checkoutIdempotencyKey = useRef<string | null>(null);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      try {
-        const localCart = JSON.parse(localStorage.getItem(CART_KEY) ?? "[]");
-        if (initialCart.length) {
-          setCart(initialCart);
-          localStorage.setItem(CART_KEY, JSON.stringify(initialCart));
-        } else if (localCart.length) {
-          setCart(localCart);
-        }
-      } catch {
-        setCart([]);
+      const localCart = readLocalCart(cartScope);
+      if (initialCart.length) {
+        setCart(initialCart);
+        writeLocalCart(initialCart, cartScope);
+      } else {
+        setCart(localCart);
+        writeLocalCart(localCart, cartScope);
       }
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [initialCart]);
+  }, [cartScope, initialCart]);
 
   const subtotal = useMemo(
     () =>
@@ -50,7 +65,11 @@ export function CheckoutPageClient({
       ),
     [cart]
   );
-  const delivery = subtotal >= 5000 || subtotal === 0 ? 0 : 350;
+  const sandboxTestCart =
+    mpesaEnvironment === "sandbox" &&
+    isMpesaSandboxTestCart(cart.map((item) => item.product));
+  const delivery =
+    sandboxTestCart || subtotal >= 5000 || subtotal === 0 ? 0 : 350;
   const total = subtotal + delivery;
 
   async function submitCheckout(event: React.FormEvent<HTMLFormElement>) {
@@ -59,17 +78,20 @@ export function CheckoutPageClient({
     setSubmitting(true);
 
     const formData = new FormData(event.currentTarget);
+    checkoutIdempotencyKey.current ??= crypto.randomUUID();
     try {
       const response = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          idempotencyKey: checkoutIdempotencyKey.current,
           items: cart.map((item) => ({
             productId: item.product.id,
             quantity: item.quantity
           })),
           delivery: {
             recipientName: String(formData.get("recipientName") ?? ""),
+            email: String(formData.get("email") ?? ""),
             phone: String(formData.get("phone") ?? ""),
             county: String(formData.get("county") ?? ""),
             town: String(formData.get("town") ?? ""),
@@ -82,15 +104,13 @@ export function CheckoutPageClient({
       const payload = await response.json();
 
       if (!response.ok) {
-        setError(payload.error ?? "Checkout failed. Please try again.");
+        checkoutIdempotencyKey.current = null;
+        setError(getCheckoutErrorMessage(payload));
         return;
       }
 
       setCart([]);
-      localStorage.removeItem(CART_KEY);
-      window.dispatchEvent(
-        new CustomEvent("talomart:cart-sync", { detail: [] })
-      );
+      clearLocalCart(cartScope);
       router.push(
         `/checkout/success?order=${encodeURIComponent(payload.order.orderNumber)}`
       );
@@ -143,7 +163,7 @@ export function CheckoutPageClient({
               Delivery details
             </h2>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
-              {[
+              {[ 
                 ["recipientName", "Recipient name"],
                 ["phone", "Phone number"],
                 ["county", "County"],
@@ -158,6 +178,21 @@ export function CheckoutPageClient({
                   />
                 </label>
               ))}
+              <label className="text-sm font-bold md:col-span-2">
+                Email address
+                <input
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  defaultValue={initialEmail}
+                  readOnly={isAuthenticated}
+                  required
+                  className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 px-4 font-normal outline-none read-only:bg-slate-50 focus:border-[var(--color-green)]"
+                />
+                <span className="mt-1 block text-xs font-normal text-slate-500">
+                  We send receipts and delivery updates to this address.
+                </span>
+              </label>
               <label className="text-sm font-bold md:col-span-2">
                 Delivery address
                 <input
@@ -180,8 +215,9 @@ export function CheckoutPageClient({
               Payment method
             </h2>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              Cash on Delivery is active now. M-Pesa STK Push will become the
-              recommended option once Daraja production approval is complete.
+              {mpesaEnvironment === "sandbox"
+                ? "M-Pesa is in Daraja sandbox mode for checkout testing. Sandbox transactions do not collect real money."
+                : "Choose Cash on Delivery or complete payment using M-Pesa STK Push."}
             </p>
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               <label
@@ -208,17 +244,18 @@ export function CheckoutPageClient({
                 </span>
               </label>
               <label
-                className={`flex cursor-pointer gap-3 rounded-2xl border p-4 transition ${
+                className={`flex gap-3 rounded-2xl border p-4 transition ${
                   paymentMethod === "mpesa"
                     ? "border-[var(--color-orange)] bg-orange-50 shadow-sm"
                     : "border-slate-200 bg-white"
-                }`}
+                } ${mpesaAvailable ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
               >
                 <input
                   type="radio"
                   name="paymentMethod"
                   value="mpesa"
                   checked={paymentMethod === "mpesa"}
+                  disabled={!mpesaAvailable}
                   onChange={() => setPaymentMethod("mpesa")}
                 />
                 <span>
@@ -226,7 +263,11 @@ export function CheckoutPageClient({
                     <CreditCard className="h-4 w-4" /> M-Pesa
                   </strong>
                   <small className="text-slate-500">
-                    STK Push · pending Daraja go-live
+                    {mpesaAvailable
+                      ? mpesaEnvironment === "sandbox"
+                        ? "STK Push · sandbox test mode"
+                        : "STK Push · secure mobile payment"
+                      : mpesaUnavailableReason ?? "STK Push is not configured"}
                   </small>
                 </span>
               </label>
@@ -235,6 +276,13 @@ export function CheckoutPageClient({
             {error && (
               <p className="mt-5 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-600">
                 {error}
+              </p>
+            )}
+
+            {!cart.length && (
+              <p className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-800">
+                Your cart has no purchasable products. Return to the live
+                catalogue and add an available item before checking out.
               </p>
             )}
 

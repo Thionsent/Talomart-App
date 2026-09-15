@@ -1,0 +1,3 @@
+import { LegalPage } from "@/components/legal/legal-page";
+export const metadata = { title: "Help Center" };
+export default function HelpPage() { return <LegalPage eyebrow="CUSTOMER CARE" title="Help Center" summary="Find clear answers about shopping, accounts, delivery and orders." effectiveDate="14 September 2026" sections={[{title:"Ordering",paragraphs:["Browse products, add them to your cart and complete checkout as a guest or signed-in customer.","Your order number appears on the confirmation page and in your confirmation email."]},{title:"Need more help?",paragraphs:["Call or WhatsApp +254 113 375 517, or email talomartelectricals@gmail.com with your order number and we will help you as quickly as possible."]}]}/>; }

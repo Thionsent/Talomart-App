@@ -55,11 +55,11 @@ For production product images, create a Supabase Storage bucket:
 
 ```env
 SUPABASE_URL=https://PROJECT_REF.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_SECRET_KEY=replace-with-a-server-only-key
 SUPABASE_STORAGE_BUCKET=product-images
 ```
 
-Keep writes private and perform uploads only through protected server-side admin actions. The service-role key must never be exposed to the browser and must never use a `NEXT_PUBLIC_` prefix.
+Keep writes private and perform uploads only through protected server-side admin actions. The secret key bypasses Row Level Security, must never be exposed to the browser and must never use a `NEXT_PUBLIC_` prefix. Existing installations may temporarily use `SUPABASE_SERVICE_ROLE_KEY`, but new deployments should use a restricted, independently revocable `sb_secret_...` key.
 
 ## 6. Deployment secrets
 
@@ -69,14 +69,21 @@ Set these in the hosting provider's encrypted secret manager:
 - `DATABASE_DIRECT_URL` for migration jobs only
 - `AUTH_SECRET`
 - `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPABASE_SECRET_KEY`
 - `SUPABASE_STORAGE_BUCKET`
 - payment, email and monitoring secrets as they are introduced
 
 Use separate Supabase projects for staging and production.
+
+After applying migrations, verify the privileged security schema and append-only audit trigger:
+
+```powershell
+npm run security:check
+```
 
 ## Official references
 
 - [Supabase PostgreSQL connection modes](https://supabase.com/docs/guides/database/connecting-to-postgres)
 - [Supabase Storage](https://supabase.com/docs/guides/storage)
 - [Supabase Queues](https://supabase.com/docs/guides/queues)
+- [Supabase API keys](https://supabase.com/docs/guides/getting-started/api-keys)

@@ -1,3 +1,5 @@
+import { env } from "@/lib/env";
+
 const acceptedImageTypes = [
   "image/jpeg",
   "image/png",
@@ -9,11 +11,12 @@ const maxImageSizeBytes = 5 * 1024 * 1024;
 
 type UploadFolder = "products" | "categories";
 
-const bucketName = process.env.SUPABASE_STORAGE_BUCKET ?? "product-images";
+const bucketName = env.SUPABASE_STORAGE_BUCKET;
 
 function storageConfig() {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl = env.SUPABASE_URL;
+  const serviceRoleKey =
+    env.SUPABASE_SECRET_KEY ?? env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !serviceRoleKey) {
     return null;
@@ -109,7 +112,7 @@ export async function uploadAdminImageFromForm(
 
   if (!config) {
     throw new Error(
-      "Supabase Storage is not configured yet. Add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY, or paste an Image URL instead."
+      "Supabase Storage is not configured yet. Add SUPABASE_URL and SUPABASE_SECRET_KEY, or paste an Image URL instead."
     );
   }
 

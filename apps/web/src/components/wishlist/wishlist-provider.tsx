@@ -18,7 +18,7 @@ import {
   readWishlistIds,
   toggleWishlistId,
   WISHLIST_EVENT,
-  WISHLIST_KEY,
+  wishlistStorageKey,
   writeWishlistIds
 } from "@/lib/wishlist-storage";
 
@@ -59,9 +59,11 @@ async function wishlistFetch(input: RequestInfo | URL, init?: RequestInit) {
 
 export function WishlistProvider({
   authenticated,
+  storageScope,
   children
 }: {
   authenticated: boolean;
+  storageScope: string;
   children: ReactNode;
 }) {
   const [ids, setIds] = useState<Set<string>>(new Set());
@@ -71,34 +73,39 @@ export function WishlistProvider({
   const idsRef = useRef<Set<string>>(new Set());
 
   const commit = useCallback((productIds: Iterable<string>) => {
-    const normalized = writeWishlistIds(productIds);
+    const normalized = writeWishlistIds(productIds, storageScope);
     const next = new Set(normalized);
     idsRef.current = next;
     setIds(next);
     return next;
-  }, []);
+  }, [storageScope]);
 
   useEffect(() => {
     let cancelled = false;
-    const localIds = readWishlistIds();
+    const localIds = readWishlistIds(storageScope);
     idsRef.current = new Set(localIds);
-    setIds(new Set(localIds));
-    setError(null);
-    // Local saving must never wait for the account database. Account sync is a
-    // background enhancement, so every heart button becomes usable immediately.
-    setReady(true);
+    const hydrationFrame = window.requestAnimationFrame(() => {
+      if (cancelled) return;
+      setIds(new Set(localIds));
+      setError(null);
+      // Local saving must never wait for the account database. Account sync is a
+      // background enhancement, so every heart button becomes usable immediately.
+      setReady(true);
+    });
 
     function receiveWishlistChange(event: Event) {
-      const eventIds = normalizeWishlistIds(
-        (event as CustomEvent<unknown>).detail ?? readWishlistIds()
-      );
+      const detail = (event as CustomEvent<unknown>).detail;
+      if (!detail || typeof detail !== "object") return;
+      const change = detail as { scope?: unknown; productIds?: unknown };
+      if (change.scope !== storageScope) return;
+      const eventIds = normalizeWishlistIds(change.productIds);
       idsRef.current = new Set(eventIds);
       setIds(new Set(eventIds));
     }
 
     function receiveStorageChange(event: StorageEvent) {
-      if (event.key !== WISHLIST_KEY) return;
-      const nextIds = readWishlistIds();
+      if (event.key !== wishlistStorageKey(storageScope)) return;
+      const nextIds = readWishlistIds(storageScope);
       idsRef.current = new Set(nextIds);
       setIds(new Set(nextIds));
     }
@@ -124,9 +131,6 @@ export function WishlistProvider({
           ...remoteIds
         ]);
 
-        if (cancelled) return;
-        commit(mergedIds);
-
         const databaseIds = mergedIds
           .filter(isDatabaseProductId)
           .slice(0, MAX_WISHLIST_ITEMS);
@@ -142,6 +146,9 @@ export function WishlistProvider({
             throw new Error("Some saved products could not be synchronized.");
           }
         }
+
+        if (cancelled) return;
+        commit(mergedIds);
       } catch {
         if (!cancelled) {
           setError(
@@ -155,10 +162,11 @@ export function WishlistProvider({
 
     return () => {
       cancelled = true;
+      window.cancelAnimationFrame(hydrationFrame);
       window.removeEventListener(WISHLIST_EVENT, receiveWishlistChange);
       window.removeEventListener("storage", receiveStorageChange);
     };
-  }, [authenticated, commit]);
+  }, [authenticated, commit, storageScope]);
 
   const toggle = useCallback(
     async (productId: string) => {

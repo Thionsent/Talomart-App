@@ -32,11 +32,20 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
 
   const error =
     typeof params?.error === "string" ? params.error : undefined;
+  const notice =
+    params?.notice === "password-reset"
+      ? "Your password has been updated. Sign in with the new password."
+      : undefined;
 
   return (
     <section className="auth-page-section">
       <div className="page-shell">
-        <AuthForm mode="sign-in" error={error} destination={destination} />
+        <AuthForm
+          mode="sign-in"
+          error={error}
+          notice={notice}
+          destination={destination}
+        />
       </div>
     </section>
   );

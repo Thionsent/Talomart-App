@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
 
+import { baselineSecurityHeaders } from "./src/lib/security-headers";
+
 const nextConfig: NextConfig = {
   output: "standalone",
   reactStrictMode: true,
@@ -18,16 +20,31 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     return [
+      ...["/checkout/success", "/track"].map((source) => ({
+        source,
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "private, no-store, max-age=0"
+          },
+          {
+            key: "X-Robots-Tag",
+            value: "noindex, nofollow, noarchive"
+          }
+        ]
+      })),
       {
         source: "/:path*",
         headers: [
-          { key: "X-Content-Type-Options", value: "nosniff" },
-          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          { key: "X-Frame-Options", value: "DENY" },
-          {
-            key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=()"
-          }
+          ...baselineSecurityHeaders,
+          ...(process.env.NODE_ENV === "production"
+            ? [
+                {
+                  key: "Strict-Transport-Security",
+                  value: "max-age=63072000; includeSubDomains; preload"
+                }
+              ]
+            : [])
         ]
       }
     ];

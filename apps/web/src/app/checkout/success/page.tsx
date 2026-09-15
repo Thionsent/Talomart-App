@@ -11,10 +11,21 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
+import { PaymentStatusRefresh } from "@/components/checkout/payment-status-refresh";
+import { env } from "@/lib/env";
+import { resolveOrderAccess } from "@/lib/order-access-server";
+import {
+  getMpesaCustomerState,
+  getMpesaResendAvailability,
+  messageForMpesaState
+} from "@/lib/payments/mpesa-lifecycle";
 import { sql } from "@talomart/db";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Order placed successfully" };
+export const metadata = {
+  title: "Order placed successfully",
+  robots: { index: false, follow: false }
+};
 
 type SuccessPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -26,16 +37,18 @@ type SuccessOrder = {
   orderStatus: string;
   paymentMethod: "mpesa" | "cash_on_delivery";
   paymentStatus: string;
+  attemptCount: number;
+  lastInitiatedAt: string | null;
+  paymentUpdatedAt: string;
+  providerQueryStatus: string | null;
   subtotalMinor: number;
   deliveryMinor: number;
   discountMinor: number;
   totalMinor: number;
   currency: string;
   recipientName: string;
-  phone: string;
   county: string;
   town: string;
-  deliveryAddress: string;
   placedAt: string;
   itemCount: number;
 };
@@ -64,9 +77,7 @@ function dateLabel(valueToFormat: string) {
   }).format(new Date(valueToFormat));
 }
 
-async function findOrder(orderNumber: string) {
-  if (!orderNumber) return null;
-
+async function findOrder(orderId: string) {
   const [order] = await sql<SuccessOrder[]>`
     select
       o.id::text as "orderId",
@@ -74,21 +85,28 @@ async function findOrder(orderNumber: string) {
       o.status as "orderStatus",
       o.payment_method as "paymentMethod",
       coalesce(p.status, 'pending') as "paymentStatus",
+      coalesce(p.attempt_count, 0)::int as "attemptCount",
+      p.last_initiated_at::text as "lastInitiatedAt",
+      coalesce(p.created_at, o.placed_at)::text as "paymentUpdatedAt",
+      p.provider_query_status as "providerQueryStatus",
       o.subtotal_minor as "subtotalMinor",
       o.delivery_minor as "deliveryMinor",
       o.discount_minor as "discountMinor",
       o.total_minor as "totalMinor",
       o.currency,
       o.recipient_name as "recipientName",
-      o.phone,
       o.county,
       o.town,
-      o.delivery_address as "deliveryAddress",
       o.placed_at::text as "placedAt",
       coalesce(items.item_count, 0)::int as "itemCount"
     from orders o
     left join lateral (
-      select status
+      select
+        status,
+        attempt_count,
+        last_initiated_at,
+        created_at,
+        provider_query_status
       from payments
       where order_id = o.id
       order by created_at desc
@@ -99,7 +117,7 @@ async function findOrder(orderNumber: string) {
       from order_items
       where order_id = o.id
     ) items on true
-    where lower(o.order_number) = lower(${orderNumber})
+    where o.id = ${orderId}::uuid
     limit 1
   `;
 
@@ -157,7 +175,8 @@ export default async function CheckoutSuccessPage({
 }: SuccessPageProps) {
   const params = (await searchParams) ?? {};
   const orderNumber = value(params, "order");
-  const order = await findOrder(orderNumber);
+  const access = await resolveOrderAccess(orderNumber);
+  const order = access ? await findOrder(access.orderId) : null;
 
   if (!order) {
     return (
@@ -165,11 +184,11 @@ export default async function CheckoutSuccessPage({
         <div className="page-shell max-w-3xl rounded-3xl bg-white p-8 text-center shadow-sm sm:p-10">
           <ReceiptText className="mx-auto h-12 w-12 text-[var(--color-orange)]" />
           <h1 className="font-brand mt-5 text-3xl font-extrabold text-[var(--color-navy)]">
-            We could not find that order
+            We could not verify access to that order
           </h1>
           <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-slate-600">
-            The order number may be missing or typed incorrectly. Use the order
-            number from checkout to track your Talomart purchase.
+            Sign in if the order belongs to your Talomart account. For a guest
+            order, use the same browser that completed checkout.
           </p>
           <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
             <Link
@@ -191,7 +210,43 @@ export default async function CheckoutSuccessPage({
   }
 
   const isCod = order.paymentMethod === "cash_on_delivery";
+  const lifecycle = {
+    orderStatus: order.orderStatus,
+    paymentStatus: order.paymentStatus,
+    attemptCount: Math.max(order.attemptCount, 1),
+    lastInitiatedAt: order.lastInitiatedAt,
+    paymentUpdatedAt: order.paymentUpdatedAt,
+    providerQueryStatus: order.providerQueryStatus
+  };
+  const mpesaState = getMpesaCustomerState(lifecycle);
+  const resend = getMpesaResendAvailability(
+    lifecycle,
+    env.MPESA_ENVIRONMENT
+  );
+  const isMpesaProcessing =
+    order.paymentMethod === "mpesa" && mpesaState === "processing";
+  const isMpesaActionNeeded =
+    order.paymentMethod === "mpesa" &&
+    (mpesaState === "prompt_timeout" || mpesaState === "failed");
+  const isMpesaAbandoned =
+    order.paymentMethod === "mpesa" && mpesaState === "abandoned";
+  const orderConfirmed = isCod || mpesaState === "confirmed";
   const paymentTone = order.paymentStatus === "paid" ? "green" : "orange";
+
+  const heroLabel = isMpesaProcessing
+    ? "PAYMENT PROCESSING"
+    : isMpesaActionNeeded
+      ? "PAYMENT ACTION NEEDED"
+      : isMpesaAbandoned
+        ? "PAYMENT REQUEST EXPIRED"
+        : "ORDER CONFIRMED";
+  const heroMessage = isMpesaProcessing
+    ? "We sent the payment request and are checking Daraja automatically. Your order is reserved, but it is not confirmed until M-Pesa reports a successful payment."
+    : isMpesaActionNeeded
+      ? "The payment has not been confirmed. Check the status below or safely resend the STK Push when available."
+      : isMpesaAbandoned
+        ? "The payment window expired without confirmation. This order was cancelled and its reserved stock was released."
+        : "Your Talomart order has been received. We’ve reserved the items and our team can now prepare the order for fulfillment.";
 
   return (
     <section className="bg-[var(--color-cream)] py-10 sm:py-14">
@@ -202,18 +257,34 @@ export default async function CheckoutSuccessPage({
             <div className="relative grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
               <div>
                 <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-[var(--color-green)] shadow-sm">
-                  <CheckCircle2 className="h-8 w-8" />
+                  {orderConfirmed ? (
+                    <CheckCircle2 className="h-8 w-8" />
+                  ) : (
+                    <CreditCard className="h-8 w-8 text-[var(--color-orange)]" />
+                  )}
                 </div>
                 <span className="mt-5 block text-xs font-extrabold tracking-[0.28em] text-[var(--color-orange)]">
-                  ORDER CONFIRMED
+                  {heroLabel}
                 </span>
                 <h1 className="font-brand mt-3 text-3xl font-extrabold sm:text-5xl">
                   Thank you, {order.recipientName.split(" ")[0]}
                 </h1>
                 <p className="mt-3 max-w-2xl text-sm leading-7 text-blue-100">
-                  Your Talomart order has been received. We&apos;ve reserved the
-                  items and our team can now prepare the order for fulfillment.
+                  {heroMessage}
                 </p>
+                {!isCod && (
+                  <PaymentStatusRefresh
+                    orderNumber={order.orderNumber}
+                    initialStatus={{
+                      state: mpesaState,
+                      message: messageForMpesaState(mpesaState),
+                      canResend: resend.canResend,
+                      retryAfterSeconds: resend.retryAfterSeconds,
+                      attemptsRemaining: resend.attemptsRemaining,
+                      attemptCount: lifecycle.attemptCount
+                    }}
+                  />
+                )}
               </div>
 
               <div className="rounded-3xl bg-white/10 p-5 ring-1 ring-white/15 backdrop-blur">
@@ -322,7 +393,6 @@ export default async function CheckoutSuccessPage({
                   <StatusPill tone={paymentTone}>{label(order.paymentStatus)}</StatusPill>
                 </div>
                 <dl className="mt-4">
-                  <DetailRow label="Customer name" value={order.recipientName} />
                   <DetailRow
                     label="Payment method"
                     value={isCod ? "Cash on Delivery" : "M-Pesa"}
@@ -350,16 +420,14 @@ export default async function CheckoutSuccessPage({
               <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
                 <MapPin className="h-7 w-7 text-[var(--color-green)]" />
                 <h2 className="font-brand mt-4 text-2xl font-extrabold text-[var(--color-navy)]">
-                  Delivery address
+                  Delivery area
                 </h2>
                 <p className="mt-3 text-sm font-bold leading-7 text-[var(--color-navy)]">
-                  {order.deliveryAddress}
-                </p>
-                <p className="mt-1 text-sm leading-7 text-slate-600">
                   {order.town}, {order.county}
                 </p>
-                <p className="mt-1 text-sm font-semibold text-slate-500">
-                  Phone: {order.phone}
+                <p className="mt-1 text-sm leading-6 text-slate-500">
+                  Your full delivery details are kept private and are available
+                  only to the fulfilment team.
                 </p>
               </div>
 

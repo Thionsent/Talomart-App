@@ -43,6 +43,55 @@
       "when": 1784752815876,
       "tag": "0005_blushing_blonde_phantom",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787223923171,
+      "tag": "0006_brave_vanisher",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787232254210,
+      "tag": "0007_messy_frightful_four",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788842827058,
+      "tag": "0008_unique_revanche",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788842868006,
+      "tag": "0009_sharp_robbie_robertson",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788862600000,
+      "tag": "0010_admin_audit_append_only",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1789207136460,
+      "tag": "0011_smiling_shockwave",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789248751956,
+      "tag": "0012_famous_shinobi_shaw",
+      "breakpoints": true
     }
   ]
 }

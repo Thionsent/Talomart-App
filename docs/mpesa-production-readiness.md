@@ -2,6 +2,9 @@
 
 Use this checklist when Safaricom Daraja Go Live is approved and production credentials are issued.
 
+Complete [M-Pesa sandbox testing](mpesa-sandbox-testing.md) before starting
+production go-live verification.
+
 ## Required production values
 
 ```env
@@ -25,8 +28,19 @@ MPESA_CALLBACK_URL=https://YOUR_DOMAIN/api/payments/mpesa/callback
 
 - Checkout creates an order and payment record before initiating STK Push.
 - Successful callback marks payment as `paid` and order as `payment_confirmed`.
-- Failed callback marks payment as `failed`, cancels pending payment orders, and releases reserved stock.
-- Callback reconciliation is idempotent by `checkout_request_id`.
+- Failed callbacks mark the attempt as `failed` but retain the order reservation
+  during the controlled recovery window. Abandonment later cancels the order
+  and releases the active reservation exactly once.
+- The customer page distinguishes processing from confirmed payment, queries
+  Daraja automatically and exposes resend only after a terminal provider
+  failure. The sandbox-only `not_found` resend rule must not be enabled in
+  production.
+- Callback records are matched by `checkout_request_id`; replay-safe state
+  transitions exist, but notification-event deduplication and database-backed
+  concurrent/out-of-order integration tests must be completed before
+  production payments are enabled.
+- A production scheduler must invoke the abandonment/reconciliation sweep so
+  expiry does not depend on an open customer page or new checkout traffic.
 - Notification events are recorded for payment success/failure and can later power SMS/email.
 
 ## Final live test

@@ -12,6 +12,9 @@ const globalForDatabase = globalThis as unknown as {
 };
 
 const connectionString =
+  (process.env.NODE_ENV !== "production"
+    ? process.env.DATABASE_DIRECT_URL
+    : undefined) ??
   process.env.DATABASE_URL ??
   "postgresql://talomart:talomart@localhost:5432/talomart";
 const configuredMaxConnections = Number(
