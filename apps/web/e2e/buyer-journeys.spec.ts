@@ -5,7 +5,7 @@ test.describe("buyer journey guardrails", () => {
     await page.goto("/sign-in");
     await expect(page.getByRole("heading", { name: /sign in to talomart/i })).toBeVisible();
     const email = page.getByLabel(/email address/i);
-    const password = page.getByLabel(/password/i);
+    const password = page.locator('input[name="password"]');
     await expect(email).toBeVisible();
     await expect(password).toBeVisible();
     await page.getByRole("button", { name: /sign in securely/i }).click();
