@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { DM_Sans, Manrope } from "next/font/google";
 import { cookies, headers } from "next/headers";
 
 import { ApplicationShell } from "@/components/layout/application-shell";
@@ -17,18 +16,6 @@ import {
 } from "@/lib/server-cart";
 
 import "./globals.css";
-
-const dmSans = DM_Sans({
-  subsets: ["latin"],
-  variable: "--font-dm-sans",
-  display: "swap"
-});
-
-const manrope = Manrope({
-  subsets: ["latin"],
-  variable: "--font-manrope",
-  display: "swap"
-});
 
 export const metadata: Metadata = {
   metadataBase: new URL(
@@ -99,7 +86,6 @@ export default async function RootLayout({
   return (
     <html
       lang="en"
-      className={`${dmSans.variable} ${manrope.variable}`}
       data-scroll-behavior="smooth"
       data-cart-scope={accountScope}
     >

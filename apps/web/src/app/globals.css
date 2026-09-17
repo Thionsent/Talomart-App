@@ -9,6 +9,8 @@
   --color-orange: #ff771f;
   --color-cream: #f4f7f4;
   --color-muted: #667085;
+  --font-dm-sans: "Segoe UI", Arial, sans-serif;
+  --font-manrope: "Segoe UI", Arial, sans-serif;
   --font-brand: var(--font-manrope);
 }
 
