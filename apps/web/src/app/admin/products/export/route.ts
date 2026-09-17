@@ -1,9 +1,19 @@
-import { requireAdminPermission } from "@/lib/admin-authorization";
+import { adminAuth } from "@/lib/auth";
 import { specificationsToCsv, stringifyCsv } from "@/lib/product-bulk-csv";
 import { sql } from "@talomart/db";
+import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
+
+async function requireAdmin() {
+  const session = await adminAuth.api.getSession({
+    headers: await headers()
+  });
+  const role = (session?.user as { role?: string } | undefined)?.role;
+
+  return Boolean(session && (role === "admin" || role === "staff"));
+}
 
 function money(minor: number | null) {
   if (!minor) return "";
@@ -11,9 +21,7 @@ function money(minor: number | null) {
 }
 
 export async function GET() {
-  try {
-    await requireAdminPermission("catalog.manage");
-  } catch {
+  if (!(await requireAdmin())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
