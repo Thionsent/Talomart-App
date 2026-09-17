@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   ClipboardList,
   Eye,
-  Menu,
   Package,
   Pencil,
   Plus,
@@ -19,7 +18,7 @@ import {
   Users
 } from "lucide-react";
 import Link from "next/link";
-import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 
 import {
   adjustInventory,
@@ -36,8 +35,17 @@ import {
   updateProduct
 } from "@/app/admin/actions";
 import { AdminSubmitButton } from "@/app/admin/form-controls";
-import { SignOutButton } from "@/components/auth/sign-out-button";
-import { adminAuth } from "@/lib/auth";
+import { AdminDashboardShell } from "@/components/admin/admin-dashboard-shell";
+import {
+  getAdminPrincipal,
+  permissionForAdminView
+} from "@/lib/admin-authorization";
+import { env } from "@/lib/env";
+import {
+  canTransitionOrderStatus,
+  customerOrderStatusLabels,
+  orderStatusForFulfillment
+} from "@/lib/order-status";
 import {
   hasConfiguredDatabase,
   logFallback,
@@ -137,7 +145,7 @@ type AdminOrder = {
   orderNumber: string;
   status: (typeof orderStatuses)[number];
   paymentStatus: (typeof paymentStatuses)[number];
-  paymentMethod: string;
+  paymentMethod: "mpesa" | "cash_on_delivery";
   totalMinor: number;
   recipientName: string;
   phone: string;
@@ -1264,12 +1272,14 @@ function SelectField({
   name,
   label: fieldLabel,
   defaultValue,
-  options
+  options,
+  disabled = false
 }: {
   name: string;
   label: string;
   defaultValue: string;
   options: { value: string; label: string }[];
+  disabled?: boolean;
 }) {
   return (
     <label className="grid min-w-0 gap-1 text-xs font-extrabold text-slate-600">
@@ -1277,7 +1287,8 @@ function SelectField({
       <select
         name={name}
         defaultValue={defaultValue}
-        className="min-h-11 w-full min-w-0 max-w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[var(--color-navy)] outline-none focus:border-[var(--color-green)]"
+        disabled={disabled}
+        className="min-h-11 w-full min-w-0 max-w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[var(--color-navy)] outline-none focus:border-[var(--color-green)] disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -1290,11 +1301,9 @@ function SelectField({
 }
 
 export default async function AdminPage({ searchParams }: AdminPageProps) {
-  const session = await adminAuth.api.getSession({
-    headers: await headers()
-  });
+  const principal = await getAdminPrincipal();
 
-  if (!session) {
+  if (!principal) {
     return (
       <section className="bg-[var(--color-cream)] py-16">
         <div className="page-shell max-w-3xl rounded-3xl bg-white p-10 text-center shadow-sm">
@@ -1316,38 +1325,24 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     );
   }
 
-  const role = (session.user as { role?: string }).role;
-  if (role !== "admin" && role !== "staff") {
-    return (
-      <section className="bg-[var(--color-cream)] py-16">
-        <div className="page-shell max-w-3xl rounded-3xl bg-white p-10 text-center shadow-sm">
-          <h1 className="font-brand text-3xl font-extrabold">
-            Staff access only
-          </h1>
-          <p className="mt-3 text-sm leading-7 text-slate-600">
-            You are signed in as a customer. Admin access is separate and only
-            available to approved Talomart staff.
-          </p>
-          <div className="mt-6 flex flex-wrap justify-center gap-3">
-            <Link
-              href="/admin/sign-in"
-              className="inline-flex min-h-11 items-center rounded-xl bg-[var(--color-green)] px-6 text-sm font-extrabold text-white"
-            >
-              Staff sign in
-            </Link>
-            <Link
-              href="/account"
-              className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 px-6 text-sm font-extrabold"
-            >
-              Back to customer account
-            </Link>
-          </div>
-        </div>
-      </section>
-    );
+  if (env.ADMIN_MFA_REQUIRED && !principal.twoFactorEnabled) {
+    redirect("/admin/security/setup");
   }
 
-  const filters = await getFilters(searchParams);
+  let filters = await getFilters(searchParams);
+  const staffDefaultView = adminViews.find(
+    (view) => view !== "overview" && principal.can(permissionForAdminView(view))
+  );
+  if (principal.role === "staff" && filters.view === "overview") {
+    if (!staffDefaultView) {
+      redirect("/admin/no-access");
+    }
+    redirect(`/admin?view=${staffDefaultView}`);
+  }
+  if (!principal.can(permissionForAdminView(filters.view))) {
+    if (!staffDefaultView) redirect("/admin/no-access");
+    filters = { ...filters, view: staffDefaultView };
+  }
   const {
     stats,
     categories,
@@ -1365,16 +1360,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     { label: "Customers", value: stats.users, detail: "Registered accounts", icon: Users },
     { label: "Revenue", value: formatMoney(stats.revenueMinor), detail: "Confirmed pipeline", icon: BarChart3 },
     { label: "Low stock", value: stats.lowStock, detail: "Needs attention", icon: AlertTriangle }
-  ];
-  const adminNav = [
-    { view: "overview", href: "/admin?view=overview", label: "Overview", icon: BarChart3 },
-    { view: "products", href: "/admin?view=products", label: "Products", icon: Package },
-    { view: "low-stock", href: "/admin?view=low-stock", label: "Low stock", icon: AlertTriangle },
-    { view: "inventory", href: "/admin?view=inventory", label: "Inventory", icon: SlidersHorizontal },
-    { view: "orders", href: "/admin?view=orders", label: "Orders", icon: ShoppingCart },
-    { view: "customers", href: "/admin?view=customers", label: "Customers", icon: Users },
-    { view: "analytics", href: "/admin?view=analytics", label: "Analytics", icon: BarChart3 },
-    { view: "categories", href: "/admin?view=categories", label: "Categories", icon: ClipboardList }
   ];
   const ordersNeedingAction = orders.filter((order) =>
     ["payment_confirmed", "processing", "packed"].includes(order.status)
@@ -1459,105 +1444,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   ];
 
   return (
-    <section className="bg-[var(--color-cream)] py-6 sm:py-10">
-      <div className="page-shell">
-        <details className="sticky top-3 z-40 mb-5 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm sm:p-3 lg:hidden">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl bg-[var(--color-navy)] px-4 py-3 text-sm font-extrabold text-white [&::-webkit-details-marker]:hidden">
-            <span className="inline-flex items-center gap-2">
-              <Menu className="h-5 w-5" />
-              Admin menu
-            </span>
-            <span className="rounded-full bg-white/10 px-3 py-1 text-xs text-blue-100">
-              {adminNav.find((item) => item.view === filters.view)?.label ?? "Open"}
-            </span>
-          </summary>
-          <nav className="mt-3 grid gap-2 sm:grid-cols-2">
-            {adminNav.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-extrabold ${
-                  filters.view === item.view
-                    ? "bg-green-50 text-[var(--color-green)]"
-                    : "text-[var(--color-navy)] hover:bg-green-50 hover:text-[var(--color-green)]"
-                }`}
-              >
-                <item.icon className="h-4 w-4" />
-                {item.label}
-              </Link>
-            ))}
-            <SignOutButton audience="admin" variant="menu" />
-          </nav>
-        </details>
-
-        <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-6">
-          <aside className="hidden lg:block">
-            <div className="sticky top-6 rounded-3xl bg-[var(--color-navy)] p-5 text-white shadow-sm">
-              <Link href="/admin" className="flex items-center gap-3">
-                <span className="brand-mark bg-white">
-                  <span />
-                </span>
-                <span>
-                  <strong className="font-brand block text-lg font-black">
-                    Talomart
-                  </strong>
-                  <small className="text-[10px] font-black uppercase tracking-[0.25em] text-[var(--color-orange)]">
-                    Admin v1.5
-                  </small>
-                </span>
-              </Link>
-
-              <div className="mt-6 rounded-2xl bg-white/10 p-4">
-                <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-100">
-                  Signed in
-                </p>
-                <p className="mt-2 truncate text-sm font-extrabold">
-                  {session.user.email}
-                </p>
-                <p className="mt-1 text-xs capitalize text-blue-100">
-                  {role} access
-                </p>
-              </div>
-
-              <nav className="mt-6 grid gap-1">
-                {adminNav.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`relative flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-extrabold text-white transition ${
-                      filters.view === item.view
-                        ? "bg-[rgba(17,162,69,0.28)] shadow-[inset_3px_0_0_var(--color-orange)]"
-                        : "text-white/85 hover:bg-white/10 hover:text-white"
-                    }`}
-                  >
-                    <item.icon className="h-4 w-4" />
-                    {item.label}
-                    {filters.view === item.view && (
-                      <span className="ml-auto h-2 w-2 rounded-full bg-[var(--color-orange)]" />
-                    )}
-                  </Link>
-                ))}
-              </nav>
-
-              <div className="mt-4">
-                <SignOutButton audience="admin" variant="admin" />
-              </div>
-
-              <div className="mt-6 rounded-2xl bg-white p-4 text-[var(--color-navy)]">
-                <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">
-                  Today focus
-                </p>
-                <p className="mt-2 text-sm font-extrabold">
-                  {stats.unfulfilled} orders need fulfilment
-                </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {stats.lowStock} low-stock products need attention.
-                </p>
-              </div>
-            </div>
-          </aside>
-
-          <main className="min-w-0">
+    <AdminDashboardShell
+      principal={principal}
+      active={filters.view}
+      focus={{
+        primary: `${stats.unfulfilled} orders need fulfilment`,
+        secondary: `${stats.lowStock} low-stock products need attention.`
+      }}
+    >
         {filters.notice && (
           <div className="mb-5 flex items-start gap-3 rounded-2xl border border-green-100 bg-green-50 p-4 text-sm font-extrabold text-[var(--color-green)] shadow-sm">
             <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
@@ -2923,10 +2817,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           </div>
         </section>
         )}
-          </main>
-        </div>
-      </div>
-    </section>
+    </AdminDashboardShell>
   );
 }
 
@@ -3402,6 +3293,19 @@ function OrderCard({ order }: { order: AdminOrder }) {
   const canCancelOrder =
     !["delivered", "returned", "cancelled"].includes(order.status) &&
     order.paymentStatus !== "paid";
+  const availableOrderStatuses = orderStatuses.filter(
+    (status) =>
+      status !== "cancelled" && canTransitionOrderStatus(order.status, status)
+  );
+  const availableFulfillmentStatuses = fulfillmentStatuses.filter(
+    (status) =>
+      canTransitionOrderStatus(order.status, orderStatusForFulfillment(status)) &&
+      !(
+        order.paymentMethod === "mpesa" &&
+        order.paymentStatus !== "paid" &&
+        orderStatusForFulfillment(status) !== order.status
+      )
+  );
 
   return (
     <article className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
@@ -3613,21 +3517,36 @@ function OrderCard({ order }: { order: AdminOrder }) {
                 name="status"
                 label="Order status"
                 defaultValue={order.status}
-                options={orderStatuses.map((status) => ({
+                options={availableOrderStatuses.map((status) => ({
                   value: status,
-                  label: label(status)
+                  label: customerOrderStatusLabels[status]
                 }))}
               />
-              <SelectField
-                name="paymentStatus"
-                label="Payment status"
-                defaultValue={order.paymentStatus}
-                options={paymentStatuses.map((status) => ({
-                  value: status,
-                  label: label(status)
-                }))}
-              />
+              {order.paymentMethod === "mpesa" ? (
+                <div className="grid gap-1 text-xs font-extrabold text-slate-600">
+                  Payment status
+                  <input type="hidden" name="paymentStatus" value={order.paymentStatus} />
+                  <div className="flex min-h-11 items-center rounded-xl border border-slate-200 bg-slate-100 px-3 text-sm font-semibold text-slate-500">
+                    {label(order.paymentStatus)} · managed by Daraja
+                  </div>
+                </div>
+              ) : (
+                <SelectField
+                  name="paymentStatus"
+                  label="Payment status"
+                  defaultValue={order.paymentStatus}
+                  options={paymentStatuses.map((status) => ({
+                    value: status,
+                    label: label(status)
+                  }))}
+                />
+              )}
             </div>
+            <TextInput
+              name="changeReason"
+              label="Reason (required for returns or refunds)"
+              placeholder="Customer return accepted, refund approved..."
+            />
             <AdminSubmitButton
               confirmKind="order"
               pendingLabel="Updating order..."
@@ -3682,6 +3601,7 @@ function OrderCard({ order }: { order: AdminOrder }) {
             )}
           </div>
 
+          {availableFulfillmentStatuses.length > 0 ? (
           <details className="rounded-2xl border border-slate-200 p-4">
             <summary className="flex cursor-pointer items-center gap-2 text-sm font-extrabold text-[var(--color-navy)]">
               <Truck className="h-4 w-4 text-[var(--color-green)]" />
@@ -3705,8 +3625,8 @@ function OrderCard({ order }: { order: AdminOrder }) {
               <SelectField
                 name="fulfillmentStatus"
                 label="Fulfilment status"
-                defaultValue="processing"
-                options={fulfillmentStatuses.map((status) => ({
+                defaultValue={availableFulfillmentStatuses[0]!}
+                options={availableFulfillmentStatuses.map((status) => ({
                   value: status,
                   label: label(status)
                 }))}
@@ -3726,6 +3646,12 @@ function OrderCard({ order }: { order: AdminOrder }) {
               </AdminSubmitButton>
             </form>
           </details>
+          ) : (
+            <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs font-semibold leading-5 text-slate-500">
+              This order has reached a terminal state. No further fulfilment
+              transition is available.
+            </p>
+          )}
         </div>
       </div>
     </article>

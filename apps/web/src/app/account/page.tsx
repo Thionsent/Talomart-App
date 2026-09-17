@@ -1,9 +1,15 @@
-import { PackageCheck, ShieldCheck, Truck, UserRound } from "lucide-react";
+import { Heart, PackageCheck, UserRound, WalletCards } from "lucide-react";
 import Link from "next/link";
 import { headers } from "next/headers";
 
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { auth } from "@/lib/auth";
+import { customerAuthHref } from "@/lib/auth-redirect";
+import {
+  customerOrderStatusLabels,
+  customerPaymentStatusLabel,
+  type OrderStatus
+} from "@/lib/order-status";
 import { sql } from "@talomart/db";
 
 export const dynamic = "force-dynamic";
@@ -11,11 +17,17 @@ export const metadata = { title: "My account" };
 
 type AccountOrder = {
   orderNumber: string;
-  status: string;
+  status: OrderStatus;
   paymentStatus: string;
   paymentMethod: string;
   totalMinor: number;
   placedAt: string;
+};
+
+type AccountStatistics = {
+  totalOrders: number;
+  lifetimeSpendMinor: number;
+  savedProducts: number;
 };
 
 function label(value: string) {
@@ -51,13 +63,13 @@ export default async function AccountPage() {
           </p>
           <div className="mt-6 flex justify-center gap-3">
             <Link
-              href="/sign-in"
+              href={customerAuthHref("/sign-in", "/account")}
               className="inline-flex min-h-11 items-center rounded-xl bg-[var(--color-green)] px-6 text-sm font-extrabold text-white"
             >
               Sign in
             </Link>
             <Link
-              href="/sign-up"
+              href={customerAuthHref("/sign-up", "/account")}
               className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 px-6 text-sm font-extrabold"
             >
               Create account
@@ -68,20 +80,66 @@ export default async function AccountPage() {
     );
   }
 
-  const orders = await sql<AccountOrder[]>`
-    select
-      o.order_number as "orderNumber",
-      o.status,
-      coalesce(p.status, 'pending') as "paymentStatus",
-      o.payment_method as "paymentMethod",
-      o.total_minor as "totalMinor",
-      o.placed_at::text as "placedAt"
-    from orders o
-    left join payments p on p.order_id = o.id
-    where o.user_id = ${session.user.id}
-    order by o.placed_at desc
-    limit 8
-  `;
+  const [orders, statisticsRows] = await Promise.all([
+    sql<AccountOrder[]>`
+      select
+        o.order_number as "orderNumber",
+        o.status,
+        coalesce(p.status, 'pending') as "paymentStatus",
+        o.payment_method as "paymentMethod",
+        o.total_minor as "totalMinor",
+        o.placed_at::text as "placedAt"
+      from orders o
+      left join lateral (
+        select status
+        from payments
+        where order_id = o.id
+        order by created_at desc
+        limit 1
+      ) p on true
+      where o.user_id = ${session.user.id}
+      order by o.placed_at desc
+      limit 8
+    `,
+    sql<AccountStatistics[]>`
+      select
+        (
+          select count(*)::int
+          from orders
+          where user_id = ${session.user.id}
+        ) as "totalOrders",
+        (
+          select coalesce(sum(o.total_minor), 0)::float8
+          from orders o
+          where o.user_id = ${session.user.id}
+            and o.status not in ('cancelled', 'returned')
+            and (
+              o.status = 'delivered'
+              or exists (
+                select 1
+                from payments p
+                where p.order_id = o.id
+                  and p.status = 'paid'
+              )
+            )
+        ) as "lifetimeSpendMinor",
+        (
+          select count(*)::int
+          from wishlist_items wi
+          inner join wishlists w on w.id = wi.wishlist_id
+          inner join products p on p.id = wi.product_id
+          inner join categories c on c.id = p.category_id
+          where w.user_id = ${session.user.id}
+            and p.is_active = true
+            and c.is_active = true
+        ) as "savedProducts"
+    `
+  ]);
+  const statistics = statisticsRows[0] ?? {
+    totalOrders: 0,
+    lifetimeSpendMinor: 0,
+    savedProducts: 0
+  };
 
   return (
     <section className="bg-[var(--color-cream)] py-10">
@@ -105,29 +163,45 @@ export default async function AccountPage() {
           {[
             {
               icon: PackageCheck,
-              title: "Orders",
-              body: `${orders.length} recent order${orders.length === 1 ? "" : "s"} in your account.`
+              title: "Total orders",
+              value: new Intl.NumberFormat("en-KE").format(statistics.totalOrders),
+              body: "Every order placed while signed in.",
+              href: "/account#orders"
             },
             {
-              icon: Truck,
-              title: "Delivery addresses",
-              body: "Save Nairobi, county and town delivery details for faster checkout."
+              icon: WalletCards,
+              title: "Lifetime spend",
+              value: formatMoney(statistics.lifetimeSpendMinor),
+              body: "Paid purchases and successfully delivered orders.",
+              href: "/account#orders"
             },
             {
-              icon: ShieldCheck,
-              title: "Account security",
-              body: "Your session is stored securely in Supabase PostgreSQL through Better Auth."
+              icon: Heart,
+              title: "Saved products",
+              value: new Intl.NumberFormat("en-KE").format(statistics.savedProducts),
+              body: "Available products saved to your synced wishlist.",
+              href: "/wishlist"
             }
           ].map((item) => (
-            <article key={item.title} className="rounded-3xl bg-white p-6 shadow-sm">
-              <item.icon className="h-8 w-8 text-[var(--color-green)]" />
-              <h2 className="font-brand mt-5 text-xl font-extrabold">
+            <Link
+              key={item.title}
+              href={item.href}
+              className="group rounded-3xl border border-transparent bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-100 hover:shadow-md"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <item.icon className="h-8 w-8 text-[var(--color-green)]" />
+                <span className="text-xs font-extrabold text-slate-400 transition group-hover:text-[var(--color-green)]">
+                  View
+                </span>
+              </div>
+              <p className="font-brand mt-5 text-3xl font-extrabold text-[var(--color-navy)]">
+                {item.value}
+              </p>
+              <h2 className="mt-2 text-sm font-extrabold text-[var(--color-navy)]">
                 {item.title}
               </h2>
-              <p className="mt-2 text-sm leading-6 text-slate-500">
-                {item.body}
-              </p>
-            </article>
+              <p className="mt-2 text-sm leading-6 text-slate-500">{item.body}</p>
+            </Link>
           ))}
         </div>
 
@@ -186,10 +260,10 @@ export default async function AccountPage() {
                   </div>
                   <div className="flex flex-wrap gap-2 text-xs font-extrabold">
                     <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-700">
-                      {label(order.status)}
+                      {customerOrderStatusLabels[order.status]}
                     </span>
                     <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">
-                      {label(order.paymentStatus)}
+                      {customerPaymentStatusLabel(order.paymentStatus)}
                     </span>
                   </div>
                   <strong className="text-[var(--color-navy)]">

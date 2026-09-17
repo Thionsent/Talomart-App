@@ -16,8 +16,10 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  CART_KEY,
   changeCartItemQuantity,
+  clearGuestLocalCart,
+  persistCartMutation,
+  readLocalCart,
   removeProductFromCart,
   type LocalCartItem,
   writeLocalCart
@@ -27,45 +29,59 @@ import {
   CustomerAccountMenu,
   type HeaderCustomer
 } from "@/components/auth/customer-account-menu";
+import { useWishlist } from "@/components/wishlist/wishlist-provider";
+import { businessInfo } from "@/lib/business-info";
 
 const formatPrice = (value: number) =>
   new Intl.NumberFormat("en-KE").format(value);
 
 export function SiteHeader({
+  cartScope,
   initialCart = [],
   customer = null,
   sessionUnavailable = false
 }: {
+  cartScope: string;
   initialCart?: LocalCartItem[];
   customer?: HeaderCustomer | null;
   sessionUnavailable?: boolean;
 }) {
   const [cart, setCart] = useState<LocalCartItem[]>(initialCart);
   const [cartOpen, setCartOpen] = useState(false);
-  const [wishlistCount, setWishlistCount] = useState(0);
+  const [cartSyncError, setCartSyncError] = useState("");
+  const { count: wishlistCount } = useWishlist();
 
   useEffect(() => {
     const hydrationFrame = window.requestAnimationFrame(() => {
-      try {
-        const localCart = JSON.parse(localStorage.getItem(CART_KEY) ?? "[]");
-        if (initialCart.length) {
-          setCart(initialCart);
-          writeLocalCart(initialCart);
-        } else if (localCart.length) {
-          setCart(localCart);
+      const localCart = readLocalCart(cartScope);
+      const guestCart = customer ? readLocalCart("guest") : [];
+      const nextCart = initialCart.length
+        ? initialCart
+        : localCart.length
+          ? localCart
+          : guestCart;
+
+      setCart(nextCart);
+      writeLocalCart(nextCart, cartScope);
+
+      if (customer) {
+        clearGuestLocalCart();
+        if (!initialCart.length && !localCart.length && guestCart.length) {
+          for (const item of guestCart) {
+            void persistCartMutation({
+              productId: item.product.id,
+              intent: "set",
+              quantity: item.quantity
+            });
+          }
         }
-        setWishlistCount(
-          JSON.parse(
-            localStorage.getItem("talomart-production-wishlist") ?? "[]"
-          ).length
-        );
-      } catch {
-        setCart([]);
       }
     });
 
     const addToCart = (event: Event) => {
       const product = (event as CustomEvent<StoreProduct>).detail;
+      if (!product) return;
+
       setCart((current) => {
         const existing = current.find(
           (item) => item.product.id === product.id
@@ -77,30 +93,29 @@ export function SiteHeader({
                 : item
             )
           : [...current, { product, quantity: 1 }];
-        writeLocalCart(updated);
+        writeLocalCart(updated, cartScope);
         return updated;
       });
     };
-    const wishlistChanged = (event: Event) => {
-      setWishlistCount((event as CustomEvent<number>).detail);
-    };
     const cartSynced = (event: Event) => {
-      setCart((event as CustomEvent<LocalCartItem[]>).detail);
+      const detail = (event as CustomEvent<unknown>).detail;
+      if (!detail || typeof detail !== "object") return;
+      const change = detail as { scope?: unknown; items?: unknown };
+      if (change.scope !== cartScope || !Array.isArray(change.items)) return;
+      setCart(change.items as LocalCartItem[]);
     };
     const openCart = () => setCartOpen(true);
 
     window.addEventListener("talomart:add-to-cart", addToCart);
     window.addEventListener("talomart:cart-sync", cartSynced);
-    window.addEventListener("talomart:wishlist-change", wishlistChanged);
     window.addEventListener("talomart:open-cart", openCart);
     return () => {
       window.cancelAnimationFrame(hydrationFrame);
       window.removeEventListener("talomart:add-to-cart", addToCart);
       window.removeEventListener("talomart:cart-sync", cartSynced);
-      window.removeEventListener("talomart:wishlist-change", wishlistChanged);
       window.removeEventListener("talomart:open-cart", openCart);
     };
-  }, [initialCart]);
+  }, [cartScope, customer, initialCart]);
 
   useEffect(() => {
     document.body.style.overflow = cartOpen ? "hidden" : "";
@@ -121,14 +136,35 @@ export function SiteHeader({
 
   function updateQuantity(productId: string, delta: number) {
     const nextCart = changeCartItemQuantity(cart, productId, delta);
+    const updatedItem = nextCart.find(
+      (item) => item.product.id === productId
+    );
+
     setCart(nextCart);
-    writeLocalCart(nextCart);
+    writeLocalCart(nextCart, cartScope);
+    setCartSyncError("");
+    void persistCartMutation({
+      productId,
+      intent: updatedItem ? "set" : "remove",
+      quantity: updatedItem?.quantity ?? 0
+    }).catch(() => {
+      setCartSyncError(
+        "Your cart is saved on this device, but server synchronization failed."
+      );
+    });
   }
 
   function removeItem(productId: string) {
     const nextCart = removeProductFromCart(cart, productId);
+
     setCart(nextCart);
-    writeLocalCart(nextCart);
+    writeLocalCart(nextCart, cartScope);
+    setCartSyncError("");
+    void persistCartMutation({ productId, intent: "remove" }).catch(() => {
+      setCartSyncError(
+        "Your cart is saved on this device, but server synchronization failed."
+      );
+    });
   }
 
   return (
@@ -247,11 +283,11 @@ export function SiteHeader({
                 <Flame /> Today&apos;s Deals
               </Link>
             </div>
-            <a className="support-line" href="tel:+254700000000">
+            <a className="support-line" href={`tel:${businessInfo.phone}`}>
               <Headphones />
               <span>
-                <small>Need help?</small>
-                <strong>+254 700 000 000</strong>
+                <small>Call or WhatsApp</small>
+                <strong>{businessInfo.phoneDisplay}</strong>
               </span>
             </a>
           </div>
@@ -305,6 +341,14 @@ export function SiteHeader({
             </div>
           ))}
         </div>
+        {cartSyncError && (
+          <p
+            className="mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800"
+            role="alert"
+          >
+            {cartSyncError}
+          </p>
+        )}
         {!cart.length && (
           <div className="drawer-empty">
             <ShoppingBag />
