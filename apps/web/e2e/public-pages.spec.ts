@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-const publicPages = ["/", "/help", "/contact", "/returns", "/shipping", "/warranty", "/payments", "/about", "/sign-in"];
+const publicPages = ["/", "/help", "/contact", "/returns", "/shipping", "/warranty", "/payments", "/about", "/sign-in", "/sign-up"];
 
 test.describe("public customer pages", () => {
   for (const path of publicPages) {
@@ -20,3 +20,12 @@ test("footer exposes real support channels and no app-store placeholders", async
   await expect(page.getByText("Download Our App")).toHaveCount(0);
   await expect(page.getByText("Admin Portal")).toHaveCount(0);
 });
+
+for (const path of ["/sign-in", "/sign-up"]) {
+  test(`${path} offers Google authentication`, async ({ page }) => {
+    await page.goto(path);
+    await expect(
+      page.getByRole("button", { name: "Continue with Google" })
+    ).toBeVisible();
+  });
+}

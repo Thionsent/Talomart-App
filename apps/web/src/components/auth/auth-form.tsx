@@ -364,16 +364,14 @@ export function AuthForm({
           pendingLabel={isSignUp ? "Creating your account…" : "Signing you in…"}
         />
 
-        {!isSignUp && (
-          <button
-            type="submit"
-            formAction={customerGoogleSignIn}
-            formNoValidate
-            className="auth-guest-button mt-3 w-full justify-center"
-          >
-            Continue with Google
-          </button>
-        )}
+        <button
+          type="submit"
+          formAction={customerGoogleSignIn}
+          formNoValidate
+          className="auth-guest-button mt-3 w-full justify-center"
+        >
+          Continue with Google
+        </button>
 
         <p className="auth-alternate">
           {isSignUp ? "Already have an account?" : "New to Talomart?"}{" "}
