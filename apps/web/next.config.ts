@@ -3,7 +3,6 @@ import type { NextConfig } from "next";
 import { baselineSecurityHeaders } from "./src/lib/security-headers";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
   reactStrictMode: true,
   poweredByHeader: false,
   allowedDevOrigins: ["localhost", "127.0.0.1", "192.168.100.16"],
