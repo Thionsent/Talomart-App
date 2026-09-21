@@ -4,6 +4,11 @@ import { ShieldCheck } from "lucide-react";
 import { FormEvent, useState } from "react";
 
 import { adminAuthClient } from "@/lib/auth-client";
+import {
+  ADMIN_TOTP_CODE_LENGTH,
+  isValidAdminTotpCode,
+  sanitizeAdminTotpCode
+} from "@/lib/admin-totp";
 
 export function AdminTwoFactorChallenge() {
   const [code, setCode] = useState("");
@@ -13,13 +18,23 @@ export function AdminTwoFactorChallenge() {
 
   async function verify(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setPending(true);
     setError("");
 
+    const submittedCode = backupMode ? code.trim() : sanitizeAdminTotpCode(code);
+
+    if (!backupMode && !isValidAdminTotpCode(submittedCode)) {
+      setError(
+        "Enter exactly six digits from the Talomart Admin entry in your authenticator app."
+      );
+      return;
+    }
+
+    setPending(true);
+
     const result = backupMode
-      ? await adminAuthClient.twoFactor.verifyBackupCode({ code })
+      ? await adminAuthClient.twoFactor.verifyBackupCode({ code: submittedCode })
       : await adminAuthClient.twoFactor.verifyTotp({
-          code: code.replace(/\s/g, ""),
+          code: submittedCode,
           trustDevice: false
         });
 
@@ -27,7 +42,7 @@ export function AdminTwoFactorChallenge() {
       setError(
         result.error.status === 429
           ? "Too many attempts. This account is temporarily locked."
-          : "That verification code is invalid or expired."
+          : "That code was not accepted. Wait for a new six-digit code from the Talomart Admin authenticator entry, check that your phone uses automatic date and time, then try again."
       );
       setPending(false);
       return;
@@ -53,23 +68,36 @@ export function AdminTwoFactorChallenge() {
           ? "Enter one unused recovery code. It will be invalidated after use."
           : "Enter the six-digit code from your authenticator app."}
       </p>
-
       <label className="auth-field mt-6">
         <span>{backupMode ? "Recovery code" : "Authenticator code"}</span>
         <span className="auth-input-shell">
           <ShieldCheck aria-hidden="true" />
           <input
             value={code}
-            onChange={(event) => setCode(event.target.value)}
+            onChange={(event) =>
+              setCode(
+                backupMode
+                  ? event.target.value
+                  : sanitizeAdminTotpCode(event.target.value)
+              )
+            }
             inputMode={backupMode ? "text" : "numeric"}
             autoComplete="one-time-code"
-            minLength={backupMode ? 4 : 6}
-            maxLength={backupMode ? 64 : 8}
+            minLength={backupMode ? 4 : ADMIN_TOTP_CODE_LENGTH}
+            maxLength={backupMode ? 64 : ADMIN_TOTP_CODE_LENGTH}
+            pattern={backupMode ? undefined : "[0-9]{6}"}
+            aria-describedby={backupMode ? undefined : "admin-totp-guidance"}
             required
             autoFocus
           />
         </span>
       </label>
+      {!backupMode && (
+        <p id="admin-totp-guidance" className="mt-2 text-xs text-slate-500">
+          Use the current six-digit code from the Talomart Admin entry. Codes
+          refresh every 30 seconds.
+        </p>
+      )}
 
       {error && (
         <div
