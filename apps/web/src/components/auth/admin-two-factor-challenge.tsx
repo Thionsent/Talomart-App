@@ -6,6 +6,7 @@ import { FormEvent, useState } from "react";
 import { adminAuthClient } from "@/lib/auth-client";
 import {
   ADMIN_TOTP_CODE_LENGTH,
+  adminMfaFailureMessage,
   isValidAdminTotpCode,
   sanitizeAdminTotpCode
 } from "@/lib/admin-totp";
@@ -40,9 +41,10 @@ export function AdminTwoFactorChallenge() {
 
     if (result.error) {
       setError(
-        result.error.status === 429
-          ? "Too many attempts. This account is temporarily locked."
-          : "That code was not accepted. Wait for a new six-digit code from the Talomart Admin authenticator entry, check that your phone uses automatic date and time, then try again."
+        adminMfaFailureMessage({
+          backupMode,
+          status: result.error.status
+        })
       );
       setPending(false);
       return;

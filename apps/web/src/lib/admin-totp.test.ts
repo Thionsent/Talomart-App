@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ADMIN_TOTP_CODE_LENGTH,
+  adminMfaFailureMessage,
   isValidAdminTotpCode,
   sanitizeAdminTotpCode
 } from "./admin-totp";
@@ -21,5 +22,17 @@ describe("admin authenticator codes", () => {
   it("removes formatting and limits pasted values to six digits", () => {
     expect(sanitizeAdminTotpCode("12 34-56")).toBe("123456");
     expect(sanitizeAdminTotpCode("92918155")).toBe("929181");
+  });
+
+  it("provides mode-specific verification guidance", () => {
+    expect(adminMfaFailureMessage({ backupMode: true })).toContain(
+      "recovery code"
+    );
+    expect(adminMfaFailureMessage({ backupMode: false })).toContain(
+      "six-digit code"
+    );
+    expect(
+      adminMfaFailureMessage({ backupMode: true, status: 429 })
+    ).toContain("temporarily locked");
   });
 });
