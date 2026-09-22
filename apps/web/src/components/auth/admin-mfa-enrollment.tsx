@@ -104,8 +104,17 @@ export function AdminMfaEnrollment() {
   return (
     <div className="mt-7 grid gap-6">
       <section className="grid gap-5 rounded-2xl border border-slate-200 p-5 sm:grid-cols-[180px_1fr]">
-        <div className="rounded-xl bg-white p-3 ring-1 ring-slate-200">
-          <QRCodeSVG value={details.totpURI} size={156} level="M" />
+        <div className="grid min-h-[180px] place-items-center rounded-xl bg-white p-3 ring-1 ring-slate-200">
+          <QRCodeSVG
+            value={details.totpURI}
+            size={156}
+            level="M"
+            marginSize={4}
+            bgColor="#ffffff"
+            fgColor="#071b42"
+            className="block h-[156px] w-[156px] max-w-none shrink-0"
+            title="Talomart Admin authenticator setup QR code"
+          />
         </div>
         <div>
           <h2 className="text-lg font-extrabold">1. Add Talomart Admin</h2>
