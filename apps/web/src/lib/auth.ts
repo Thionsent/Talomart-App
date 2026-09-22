@@ -16,13 +16,20 @@ import { after } from "next/server";
 import { sendPasswordResetEmail } from "./email";
 import { env } from "./env";
 import { logger } from "./logger";
+import { buildAuthTrustedOrigins } from "./auth-origins";
 
 const trustedProxyIps = env.TRUSTED_PROXY_IPS.split(",")
   .map((value) => value.trim())
   .filter(Boolean);
 
+const trustedAuthOrigins = buildAuthTrustedOrigins(env.NEXT_PUBLIC_APP_URL, {
+  deploymentUrl: process.env.VERCEL_URL,
+  branchUrl: process.env.VERCEL_BRANCH_URL,
+  productionUrl: process.env.VERCEL_PROJECT_PRODUCTION_URL
+});
+
 const sharedSecurityOptions = {
-  trustedOrigins: [env.NEXT_PUBLIC_APP_URL],
+  trustedOrigins: trustedAuthOrigins,
   rateLimit: {
     enabled: true,
     storage: "database" as const,

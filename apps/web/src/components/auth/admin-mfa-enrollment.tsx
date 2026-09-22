@@ -34,7 +34,11 @@ export function AdminMfaEnrollment() {
     setPending(false);
 
     if (result.error || !result.data) {
-      setError("Your password could not be verified. Check it and try again.");
+      setError(
+        result.error?.status === 403
+          ? "This Talomart address is not approved for secure enrollment. Open the canonical production website and try again."
+          : "Your password could not be verified. Check it and try again."
+      );
       return;
     }
     setDetails(result.data);
