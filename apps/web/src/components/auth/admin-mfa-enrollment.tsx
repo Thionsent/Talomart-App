@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, Copy, ShieldCheck } from "lucide-react";
-import { QRCodeSVG } from "qrcode.react";
+import { QRCodeCanvas } from "qrcode.react";
 import { FormEvent, useMemo, useState } from "react";
 
 import { adminAuthClient } from "@/lib/auth-client";
@@ -105,7 +105,7 @@ export function AdminMfaEnrollment() {
     <div className="mt-7 grid gap-6">
       <section className="grid gap-5 rounded-2xl border border-slate-200 p-5 sm:grid-cols-[180px_1fr]">
         <div className="grid min-h-[180px] place-items-center rounded-xl bg-white p-3 ring-1 ring-slate-200">
-          <QRCodeSVG
+          <QRCodeCanvas
             value={details.totpURI}
             size={156}
             level="M"
@@ -113,7 +113,7 @@ export function AdminMfaEnrollment() {
             bgColor="#ffffff"
             fgColor="#071b42"
             className="block h-[156px] w-[156px] max-w-none shrink-0"
-            title="Talomart Admin authenticator setup QR code"
+            aria-label="Talomart Admin authenticator setup QR code"
           />
         </div>
         <div>
