@@ -1,8 +1,9 @@
 import { ProductGrid } from "@/components/catalog/product-grid";
 import { ProductToolbar } from "@/components/catalog/product-toolbar";
 import { getCategories, getProducts } from "@/lib/catalog-queries";
+import { privatePageRobots } from "@/lib/seo";
 
-export const metadata = { title: "Search" };
+export const metadata = { title: "Search", robots: privatePageRobots };
 export const revalidate = 60;
 
 interface SearchPageProps {

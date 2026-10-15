@@ -1,3 +1,4 @@
 import { LegalPage } from "@/components/legal/legal-page";
-export const metadata = { title: "About Talomart" };
+import { publicPageMetadata } from "@/lib/seo";
+export const metadata = publicPageMetadata("About Talomart", "Learn about Talomart Stores and our approach to dependable tech, clear product information and customer support in Kenya.", "/about");
 export default function AboutPage() { return <LegalPage eyebrow="ABOUT TALOMART" title="Powering your connections" summary="Talomart Stores helps customers find dependable phones, audio, charging, storage and smart accessories." effectiveDate="14 September 2026" sections={[{title:"What we do",paragraphs:["We make everyday technology easier to discover, compare and buy with clear product information and reliable support."]},{title:"Our promise",paragraphs:["We focus on genuine products, fair prices, secure checkout and helpful after-sales care."]}]}/>; }

@@ -1,6 +1,7 @@
 import { LegalPage } from "@/components/legal/legal-page";
+import { publicPageMetadata } from "@/lib/seo";
 
-export const metadata = { title: "Privacy Policy" };
+export const metadata = publicPageMetadata("Privacy Policy", "Read how Talomart Stores handles customer information when you browse, create an account or place an order.", "/privacy");
 
 export default function PrivacyPage() {
   return (

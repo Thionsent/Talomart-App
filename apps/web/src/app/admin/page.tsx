@@ -4,10 +4,12 @@ import {
   CheckCircle2,
   ClipboardList,
   Eye,
+  ImagePlus,
   Package,
   Pencil,
   Plus,
   Printer,
+  RotateCcw,
   Save,
   Search,
   ShoppingCart,
@@ -30,17 +32,22 @@ import {
   createCategory,
   createFulfillment,
   createProduct,
+  publishProduct,
+  restoreProduct,
   updateCategory,
   updateOrder,
   updateProduct
 } from "@/app/admin/actions";
 import { AdminSubmitButton } from "@/app/admin/form-controls";
+import { InlineFeaturedToggle, InlineProductEditorForm } from "@/app/admin/inline-product-controls";
+import { ProductImageEditor } from "@/app/admin/product-image-editor";
 import { AdminDashboardShell } from "@/components/admin/admin-dashboard-shell";
 import {
   getAdminPrincipal,
   permissionForAdminView
 } from "@/lib/admin-authorization";
 import { env } from "@/lib/env";
+import { MPESA_SANDBOX_TEST_PRODUCT_SLUG } from "@/lib/payments/mpesa-sandbox-product";
 import {
   canTransitionOrderStatus,
   customerOrderStatusLabels,
@@ -51,6 +58,9 @@ import {
   logFallback,
   withTimeout
 } from "@/lib/database-resilience";
+import { resolveCategoryImageUrl } from "@/lib/catalog";
+import { normalizeProductSpecifications } from "@/lib/product-specifications";
+import { clampAdminPage, parseAdminPage } from "@/lib/admin-pagination";
 import { sql } from "@talomart/db";
 
 export const dynamic = "force-dynamic";
@@ -136,6 +146,8 @@ type AdminProduct = {
   availableQuantity: number;
   lowStockThreshold: number;
   isActive: boolean;
+  categoryIsActive: boolean;
+  archivedAt: Date | null;
   isFeatured: boolean;
   specifications: Record<string, string>;
 };
@@ -180,6 +192,13 @@ type InventoryMovement = {
   createdAt: string;
 };
 
+type InventoryChoice = {
+  id: string;
+  sku: string;
+  name: string;
+  availableQuantity: number;
+};
+
 type AdminCustomer = {
   id: string;
   name: string;
@@ -221,6 +240,14 @@ type AdminFilters = {
   categoryId: string;
   stockFilter: string;
   productSort: string;
+  productPage: number;
+  editProductId: string;
+  lowStockPage: number;
+  lowStockQuery: string;
+  lowStockFilter: string;
+  inventoryQuery: string;
+  movementQuery: string;
+  movementPage: number;
   orderQuery: string;
   orderStatus: string;
   paymentStatus: string;
@@ -259,6 +286,66 @@ function value(params: Record<string, string | string[] | undefined>, key: strin
   return typeof item === "string" ? item : "";
 }
 
+const productPageSize = 24;
+const lowStockPageSize = 18;
+const movementPageSize = 20;
+
+function adminHref(
+  view: AdminView,
+  values: Record<string, string | number | undefined>,
+  anchor: string = view
+) {
+  const params = new URLSearchParams({ view });
+  for (const [key, item] of Object.entries(values)) {
+    if (item !== undefined && item !== "") params.set(key, String(item));
+  }
+  return `/admin?${params.toString()}#${anchor}`;
+}
+
+function AdminPager({
+  view,
+  values,
+  pageKey,
+  page,
+  total,
+  pageSize,
+  anchor = view
+}: {
+  view: AdminView;
+  values: Record<string, string | number | undefined>;
+  pageKey: string;
+  page: number;
+  total: number;
+  pageSize: number;
+  anchor?: string;
+}) {
+  if (!total) return null;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const visiblePages = [...new Set([1, page - 1, page, page + 1, pages])]
+    .filter((item) => item >= 1 && item <= pages)
+    .sort((a, b) => a - b);
+  const linkClass = "inline-flex min-h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-[var(--color-navy)] hover:border-[var(--color-green)]";
+  return (
+    <nav aria-label={`${view} pages`} className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4 text-sm text-slate-600">
+      <span>Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total} · Page {page} of {pages}</span>
+      <div className="flex flex-wrap gap-2">
+        {page > 1 && <Link className={linkClass} href={adminHref(view, { ...values, [pageKey]: page - 1 }, anchor)}>Previous</Link>}
+        {visiblePages.map((item, index) => (
+          <span key={item} className="inline-flex items-center gap-2">
+            {index > 0 && item - visiblePages[index - 1]! > 1 && <span aria-hidden="true">…</span>}
+            {item === page ? (
+              <span aria-current="page" className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-xl bg-[var(--color-navy)] px-3 font-bold text-white">{item}</span>
+            ) : (
+              <Link className={linkClass} href={adminHref(view, { ...values, [pageKey]: item }, anchor)} aria-label={`Page ${item}`}>{item}</Link>
+            )}
+          </span>
+        ))}
+        {page < pages && <Link className={linkClass} href={adminHref(view, { ...values, [pageKey]: page + 1 }, anchor)}>Next</Link>}
+      </div>
+    </nav>
+  );
+}
+
 function toAdminView(value: string): AdminView {
   return adminViews.includes(value as AdminView)
     ? (value as AdminView)
@@ -275,6 +362,14 @@ async function getFilters(searchParams?: AdminPageProps["searchParams"]) {
     categoryId: value(params, "category"),
     stockFilter: value(params, "stock"),
     productSort: value(params, "sort") || "newest",
+    productPage: parseAdminPage(value(params, "pp")),
+    editProductId: value(params, "edit"),
+    lowStockPage: parseAdminPage(value(params, "lp")),
+    lowStockQuery: value(params, "lq").trim().slice(0, 120),
+    lowStockFilter: value(params, "ls") === "out" ? "out" : value(params, "ls") === "low" ? "low" : "all",
+    inventoryQuery: value(params, "iq").trim().slice(0, 120),
+    movementQuery: value(params, "mq").trim().slice(0, 120),
+    movementPage: parseAdminPage(value(params, "mp")),
     orderQuery: value(params, "oq"),
     orderStatus: value(params, "os"),
     paymentStatus: value(params, "pay"),
@@ -311,7 +406,7 @@ async function getAdminData(filters: AdminFilters) {
   `;
 
   const needsCategories = ["overview", "products", "categories"].includes(filters.view);
-  const needsProducts = ["products", "inventory"].includes(filters.view);
+  const needsProducts = filters.view === "products";
   const needsLowStockProducts = ["overview", "low-stock"].includes(filters.view);
   const needsOrders = ["overview", "orders"].includes(filters.view);
   const needsMovements = filters.view === "inventory";
@@ -334,6 +429,35 @@ async function getAdminData(filters: AdminFilters) {
     order by c.sort_order asc, c.name asc
   `
     : [];
+
+  const [productCounts] = needsProducts
+    ? await sql<{ total: number; featured: number; lowStock: number }[]>`
+      select count(*)::int as total,
+        count(*) filter (where p.is_featured)::int as featured,
+        count(*) filter (where p.stock_quantity - p.reserved_quantity <= p.low_stock_threshold)::int as "lowStock"
+      from products p join categories c on c.id = p.category_id
+      where
+        (${filters.productQuery}::text = ''
+          or p.name ilike '%' || ${filters.productQuery} || '%'
+          or p.sku ilike '%' || ${filters.productQuery} || '%'
+          or c.name ilike '%' || ${filters.productQuery} || '%')
+        and (${filters.categoryId}::text = '' or p.category_id::text = ${filters.categoryId})
+        and (
+          ${filters.productStatus} = 'all'
+          or (${filters.productStatus} = 'active' and p.is_active = true and p.archived_at is null)
+          or (${filters.productStatus} = 'draft' and p.is_active = false and p.archived_at is null)
+          or (${filters.productStatus} = 'archived' and p.archived_at is not null)
+          or (${filters.productStatus} = 'featured' and p.is_featured = true and p.archived_at is null)
+        )
+        and (
+          ${filters.stockFilter} = ''
+          or (${filters.stockFilter} = 'low' and p.stock_quantity - p.reserved_quantity <= p.low_stock_threshold)
+          or (${filters.stockFilter} = 'out' and p.stock_quantity - p.reserved_quantity <= 0)
+        )
+    `
+    : [];
+  const productTotal = productCounts?.total ?? 0;
+  const productPage = clampAdminPage(filters.productPage, productTotal, productPageSize);
 
   const products = needsProducts
     ? await sql<AdminProduct[]>`
@@ -360,6 +484,8 @@ async function getAdminData(filters: AdminFilters) {
       greatest(p.stock_quantity - p.reserved_quantity, 0)::int as "availableQuantity",
       p.low_stock_threshold as "lowStockThreshold",
       p.is_active as "isActive",
+      p.archived_at as "archivedAt",
+      c.is_active as "categoryIsActive",
       p.is_featured as "isFeatured",
       p.specifications
     from products p
@@ -372,9 +498,10 @@ async function getAdminData(filters: AdminFilters) {
       and (${filters.categoryId}::text = '' or p.category_id::text = ${filters.categoryId})
       and (
         ${filters.productStatus} = 'all'
-        or (${filters.productStatus} = 'active' and p.is_active = true)
-        or (${filters.productStatus} = 'archived' and p.is_active = false)
-        or (${filters.productStatus} = 'featured' and p.is_featured = true)
+        or (${filters.productStatus} = 'active' and p.is_active = true and p.archived_at is null)
+        or (${filters.productStatus} = 'draft' and p.is_active = false and p.archived_at is null)
+        or (${filters.productStatus} = 'archived' and p.archived_at is not null)
+        or (${filters.productStatus} = 'featured' and p.is_featured = true and p.archived_at is null)
       )
       and (
         ${filters.stockFilter} = ''
@@ -386,10 +513,65 @@ async function getAdminData(filters: AdminFilters) {
       case when ${filters.productSort} = 'price-high' then p.price_minor end desc,
       case when ${filters.productSort} = 'stock-low' then p.stock_quantity - p.reserved_quantity end asc,
       p.is_active desc,
-      p.created_at desc
-    limit 80
+      p.created_at desc,
+      p.id desc
+    limit ${productPageSize} offset ${(productPage - 1) * productPageSize}
   `
     : [];
+
+  const inventoryChoices = filters.view === "inventory" && filters.inventoryQuery
+    ? await sql<InventoryChoice[]>`
+        select p.id::text, p.sku, p.name,
+          greatest(p.stock_quantity - p.reserved_quantity, 0)::int as "availableQuantity"
+        from products p
+        where p.is_active = true
+          and (p.name ilike '%' || ${filters.inventoryQuery} || '%'
+            or p.sku ilike '%' || ${filters.inventoryQuery} || '%')
+        order by case when lower(p.sku) = lower(${filters.inventoryQuery}) then 0 else 1 end,
+          p.name asc, p.id asc
+        limit 25
+      `
+    : [];
+  const [inventorySummary] = filters.view === "inventory"
+    ? await sql<{ availableUnits: number; movementTotal: number }[]>`
+        select
+          (select coalesce(sum(greatest(stock_quantity - reserved_quantity, 0)), 0)::int
+           from products where is_active = true) as "availableUnits",
+          (select count(*)::int from inventory_movements) as "movementTotal"
+      `
+    : [];
+
+  const [lowStockSummary] = filters.view === "low-stock"
+    ? await sql<{ stockouts: number; suggested: number }[]>`
+        select
+          count(*) filter (where stock_quantity - reserved_quantity <= 0)::int as stockouts,
+          coalesce(sum(greatest(
+            1,
+            low_stock_threshold,
+            low_stock_threshold * 2 - greatest(stock_quantity - reserved_quantity, 0)
+          )), 0)::int as suggested
+        from products
+        where is_active = true
+          and stock_quantity - reserved_quantity <= low_stock_threshold
+      `
+    : [];
+  const [lowStockCount] = filters.view === "low-stock"
+    ? await sql<{ total: number }[]>`
+        select count(*)::int as total
+        from products p join categories c on c.id = p.category_id
+        where p.is_active = true
+          and p.stock_quantity - p.reserved_quantity <= p.low_stock_threshold
+          and (${filters.lowStockQuery}::text = ''
+            or p.name ilike '%' || ${filters.lowStockQuery} || '%'
+            or p.sku ilike '%' || ${filters.lowStockQuery} || '%'
+            or c.name ilike '%' || ${filters.lowStockQuery} || '%')
+          and (${filters.lowStockFilter} = 'all'
+            or (${filters.lowStockFilter} = 'out' and p.stock_quantity - p.reserved_quantity <= 0)
+            or (${filters.lowStockFilter} = 'low' and p.stock_quantity - p.reserved_quantity > 0))
+      `
+    : [];
+  const lowStockTotal = lowStockCount?.total ?? 0;
+  const lowStockPage = clampAdminPage(filters.lowStockPage, lowStockTotal, lowStockPageSize);
 
   const lowStockProducts = needsLowStockProducts
     ? await sql<AdminProduct[]>`
@@ -416,14 +598,26 @@ async function getAdminData(filters: AdminFilters) {
       greatest(p.stock_quantity - p.reserved_quantity, 0)::int as "availableQuantity",
       p.low_stock_threshold as "lowStockThreshold",
       p.is_active as "isActive",
+      p.archived_at as "archivedAt",
+      c.is_active as "categoryIsActive",
       p.is_featured as "isFeatured",
       p.specifications
     from products p
     inner join categories c on c.id = p.category_id
     where p.is_active = true
       and p.stock_quantity - p.reserved_quantity <= p.low_stock_threshold
-    order by p.stock_quantity - p.reserved_quantity asc, p.name asc
-    limit 12
+      and (${filters.view} <> 'low-stock' or (
+        (${filters.lowStockQuery}::text = ''
+          or p.name ilike '%' || ${filters.lowStockQuery} || '%'
+          or p.sku ilike '%' || ${filters.lowStockQuery} || '%'
+          or c.name ilike '%' || ${filters.lowStockQuery} || '%')
+        and (${filters.lowStockFilter} = 'all'
+          or (${filters.lowStockFilter} = 'out' and p.stock_quantity - p.reserved_quantity <= 0)
+          or (${filters.lowStockFilter} = 'low' and p.stock_quantity - p.reserved_quantity > 0))
+      ))
+    order by p.stock_quantity - p.reserved_quantity asc, p.name asc, p.id asc
+    limit ${filters.view === "low-stock" ? lowStockPageSize : 12}
+    offset ${filters.view === "low-stock" ? (lowStockPage - 1) * lowStockPageSize : 0}
   `
     : [];
 
@@ -509,6 +703,21 @@ async function getAdminData(filters: AdminFilters) {
   `
     : [];
 
+  const [filteredMovementCount] = needsMovements && filters.movementQuery
+    ? await sql<{ total: number }[]>`
+        select count(*)::int as total
+        from inventory_movements im
+        join products p on p.id = im.product_id
+        where p.name ilike '%' || ${filters.movementQuery} || '%'
+          or p.sku ilike '%' || ${filters.movementQuery} || '%'
+          or coalesce(im.reason, '') ilike '%' || ${filters.movementQuery} || '%'
+      `
+    : [];
+  const movementTotal = filters.movementQuery
+    ? (filteredMovementCount?.total ?? 0)
+    : (inventorySummary?.movementTotal ?? 0);
+  const movementPage = clampAdminPage(filters.movementPage, movementTotal, movementPageSize);
+
   const movements = needsMovements
     ? await sql<InventoryMovement[]>`
     select
@@ -521,8 +730,12 @@ async function getAdminData(filters: AdminFilters) {
       im.created_at::text as "createdAt"
     from inventory_movements im
     inner join products p on p.id = im.product_id
-    order by im.created_at desc
-    limit 12
+    where ${filters.movementQuery}::text = ''
+      or p.name ilike '%' || ${filters.movementQuery} || '%'
+      or p.sku ilike '%' || ${filters.movementQuery} || '%'
+      or coalesce(im.reason, '') ilike '%' || ${filters.movementQuery} || '%'
+    order by im.created_at desc, im.id desc
+    limit ${movementPageSize} offset ${(movementPage - 1) * movementPageSize}
   `
     : [];
 
@@ -571,9 +784,18 @@ async function getAdminData(filters: AdminFilters) {
       },
     categories,
     products,
+    productCounts: productCounts ?? { total: 0, featured: 0, lowStock: 0 },
+    productPage,
     lowStockProducts,
+    lowStockPage,
+    lowStockTotal,
+    lowStockSummary: lowStockSummary ?? { stockouts: 0, suggested: 0 },
     orders,
+    inventoryChoices,
+    inventorySummary: inventorySummary ?? { availableUnits: 0, movementTotal: 0 },
     movements,
+    movementTotal,
+    movementPage,
     customers,
     analytics
   };
@@ -718,7 +940,7 @@ async function loadAdminAnalytics(): Promise<AdminAnalytics> {
 }
 
 function money(minor: number | null | undefined) {
-  if (!minor) return "";
+  if (minor == null) return "";
   return String(Math.round(minor / 100));
 }
 
@@ -731,7 +953,7 @@ function label(value: string) {
 }
 
 function specText(specifications: Record<string, string>) {
-  return Object.entries(specifications ?? {})
+  return Object.entries(normalizeProductSpecifications(specifications))
     .map(([key, itemValue]) => `${key}: ${itemValue}`)
     .join("\n");
 }
@@ -823,6 +1045,7 @@ function paymentBadge(order: AdminOrder) {
 
 function reorderSuggestion(product: AdminProduct) {
   return Math.max(
+    1,
     product.lowStockThreshold,
     product.lowStockThreshold * 2 - product.availableQuantity
   );
@@ -1000,11 +1223,16 @@ function TextArea({
 
 function ImageUploadField({
   currentImageUrl,
+  fallbackImageUrl,
   compact = false
 }: {
   currentImageUrl?: string | null | undefined;
+  fallbackImageUrl?: string | null | undefined;
   compact?: boolean;
 }) {
+  const displayImageUrl = currentImageUrl ?? fallbackImageUrl;
+  const isUsingDefaultImage = !currentImageUrl && Boolean(fallbackImageUrl);
+
   return (
     <div
       className={`grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 ${
@@ -1012,12 +1240,12 @@ function ImageUploadField({
       }`}
     >
       <div className="overflow-hidden rounded-2xl border border-white bg-white shadow-sm">
-        {currentImageUrl ? (
+        {displayImageUrl ? (
           <div
             role="img"
-            aria-label="Current catalogue asset"
+            aria-label={isUsingDefaultImage ? "Talomart default category artwork" : "Current catalogue asset"}
             className="h-32 w-full bg-cover bg-center"
-            style={{ backgroundImage: `url(${currentImageUrl})` }}
+            style={{ backgroundImage: `url(${displayImageUrl})` }}
           />
         ) : (
           <div className="flex h-32 items-center justify-center bg-gradient-to-br from-emerald-50 to-blue-50 text-3xl">
@@ -1046,8 +1274,9 @@ function ImageUploadField({
         />
 
         <p className="rounded-xl bg-white px-3 py-2 text-xs font-semibold leading-5 text-slate-500">
-          Uploads support JPG, PNG, WebP and AVIF up to 5MB. If you upload a
-          file, it replaces the pasted URL.
+          {isUsingDefaultImage
+            ? "Showing Talomart default artwork. Upload or paste an image to replace it for this category."
+            : "Uploads support JPG, PNG, WebP and AVIF up to 5MB. If you upload a file, it replaces the pasted URL."}
         </p>
       </div>
     </div>
@@ -1080,16 +1309,19 @@ function ProductForm({
   action,
   categories,
   product,
-  submitLabel
+  submitLabel,
+  returnTo
 }: {
   action: (formData: FormData) => Promise<void>;
   categories: AdminCategory[];
   product?: AdminProduct;
   submitLabel: string;
+  returnTo?: string;
 }) {
-  return (
-    <form action={action} className="grid gap-4">
+  const fields = (
+    <>
       {product && <input type="hidden" name="productId" value={product.id} />}
+      {returnTo && <input type="hidden" name="returnTo" value={returnTo} />}
       <div className="grid gap-3 md:grid-cols-3">
         <TextInput
           name="name"
@@ -1132,7 +1364,7 @@ function ProductForm({
         </label>
         <TextInput
           name="price"
-          label="Price (KSh)"
+          label="Price (KSh; 0 while unpublished)"
           type="number"
           required
           defaultValue={money(product?.priceMinor)}
@@ -1145,7 +1377,11 @@ function ProductForm({
         />
       </div>
 
-      <ImageUploadField currentImageUrl={product?.imageUrl} />
+      {product ? (
+        <ProductImageEditor key={product.imageUrl ?? "new-image"} currentImageUrl={product.imageUrl} />
+      ) : (
+        <ImageUploadField />
+      )}
 
       <div className="grid gap-3 xl:grid-cols-3">
         <TextInput
@@ -1163,16 +1399,15 @@ function ProductForm({
           defaultValue={product?.lowStockThreshold ?? 5}
         />
         <div className="flex flex-wrap items-end gap-2">
-          <Checkbox
-            name="isActive"
-            label="Active"
-            defaultChecked={product?.isActive ?? true}
-          />
-          <Checkbox
-            name="isFeatured"
-            label="Featured"
-            defaultChecked={product?.isFeatured ?? false}
-          />
+          {product?.isActive ? (
+            <Checkbox name="isActive" label="Published" defaultChecked />
+          ) : (
+            <p className="text-xs text-slate-500">
+              {product?.archivedAt
+                ? "Restore to draft before publishing."
+                : "Save as a draft, then use Publish when price, stock and image are ready."}
+            </p>
+          )}
         </div>
       </div>
 
@@ -1195,7 +1430,16 @@ function ProductForm({
         defaultValue={product ? specText(product.specifications) : ""}
         placeholder={"Capacity: 20000mAh\nWarranty: 12 months"}
       />
+    </>
+  );
 
+  if (product) {
+    return <InlineProductEditorForm>{fields}</InlineProductEditorForm>;
+  }
+
+  return (
+    <form action={action} className="grid gap-4">
+      {fields}
       <AdminSubmitButton
         pendingLabel="Saving product..."
         className="inline-flex min-h-11 w-max items-center justify-center gap-2 rounded-xl bg-[var(--color-green)] px-5 text-sm font-extrabold text-white"
@@ -1244,7 +1488,11 @@ function CategoryForm({
           defaultValue={category?.sortOrder ?? 0}
         />
       </div>
-      <ImageUploadField currentImageUrl={category?.imageUrl} compact={compact} />
+      <ImageUploadField
+        currentImageUrl={category?.imageUrl}
+        fallbackImageUrl={category ? resolveCategoryImageUrl(category.slug) : null}
+        compact={compact}
+      />
       <TextArea
         name="description"
         label="Description"
@@ -1347,12 +1595,31 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     stats,
     categories,
     products,
+    productCounts,
+    productPage,
     lowStockProducts,
+    lowStockPage,
+    lowStockTotal,
+    lowStockSummary,
     orders,
+    inventoryChoices,
+    inventorySummary,
     movements,
+    movementTotal,
+    movementPage,
     customers,
     analytics
   } = await getAdminData(filters);
+  const productListValues = {
+    pq: filters.productQuery,
+    ps: filters.productStatus,
+    category: filters.categoryId,
+    stock: filters.stockFilter,
+    sort: filters.productSort,
+    pp: productPage
+  };
+  const inventoryListValues = { iq: filters.inventoryQuery, mq: filters.movementQuery };
+  const lowStockListValues = { lq: filters.lowStockQuery, ls: filters.lowStockFilter };
 
   const cards = [
     { label: "Products", value: stats.products, detail: `${stats.activeProducts} active`, icon: Package },
@@ -1452,7 +1719,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         secondary: `${stats.lowStock} low-stock products need attention.`
       }}
     >
-        {filters.notice && (
+        {filters.notice && filters.view !== "products" && (
           <div className="mb-5 flex items-start gap-3 rounded-2xl border border-green-100 bg-green-50 p-4 text-sm font-extrabold text-[var(--color-green)] shadow-sm">
             <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
             <div>
@@ -1464,7 +1731,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           </div>
         )}
 
-        {filters.error && (
+        {filters.error && filters.view !== "products" && (
           <div className="mb-5 flex items-start gap-3 rounded-2xl border border-red-100 bg-red-50 p-4 text-sm font-extrabold text-red-600 shadow-sm">
             <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
             <div>
@@ -1883,6 +2150,16 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
 
         {filters.view === "products" && (
         <section id="products" className="mt-6 rounded-3xl bg-white p-4 shadow-sm sm:p-6 lg:mt-8">
+          {filters.notice && (
+            <div className="mb-5 rounded-2xl border border-green-100 bg-green-50 p-4 text-sm font-bold text-green-800" role="status">
+              {filters.notice}
+            </div>
+          )}
+          {filters.error && (
+            <div className="mb-5 rounded-2xl border border-red-100 bg-red-50 p-4 text-sm font-bold text-red-700" role="alert">
+              {filters.error}
+            </div>
+          )}
           <div className="mb-5 overflow-hidden rounded-3xl bg-gradient-to-r from-[var(--color-navy)] to-[#12366d] p-5 text-white">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
               <div>
@@ -1900,24 +2177,37 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               <div className="grid grid-cols-3 gap-3 text-center text-xs">
                 <div className="rounded-2xl bg-white/10 p-3">
                   <strong className="font-brand block text-xl text-white">
-                    {products.length}
+                    {productCounts.total}
                   </strong>
-                  showing
+                  matches
                 </div>
                 <div className="rounded-2xl bg-white/10 p-3">
                   <strong className="font-brand block text-xl text-white">
-                    {products.filter((product) => product.isFeatured).length}
+                    {productCounts.featured}
                   </strong>
                   featured
                 </div>
                 <div className="rounded-2xl bg-white/10 p-3">
                   <strong className="font-brand block text-xl text-white">
-                    {products.filter((product) => product.availableQuantity <= product.lowStockThreshold).length}
+                    {productCounts.lowStock}
                   </strong>
                   low stock
                 </div>
               </div>
             </div>
+          </div>
+
+          <div className="mb-5 flex flex-wrap items-center gap-3">
+            <Link
+              href="/admin/products/images"
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[var(--color-green)] px-5 text-sm font-extrabold text-white"
+            >
+              <ImagePlus className="h-5 w-5" />
+              Bulk upload product images
+            </Link>
+            <span className="text-xs leading-5 text-slate-500">
+              Match photos to product SKUs and review them before upload.
+            </span>
           </div>
 
           <form action="/admin#products" className="mb-5 rounded-3xl border border-slate-200 bg-slate-50 p-4">
@@ -1939,6 +2229,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 defaultValue={filters.productStatus}
                 options={[
                   { value: "active", label: "Active" },
+                  { value: "draft", label: "Draft" },
                   { value: "all", label: "All" },
                   { value: "featured", label: "Featured" },
                   { value: "archived", label: "Archived" }
@@ -2043,7 +2334,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 <div className="mt-4 rounded-2xl bg-blue-50 p-3 text-xs leading-5 text-blue-800">
                   Required columns: <strong>sku, name, slug, categorySlug, price,
                   stockQuantity</strong>. Optional fields include compareAtPrice,
-                  imageUrl, active/featured flags and specifications.
+                  imageUrl, active/featured flags and specifications. Omitted
+                  isActive defaults to inactive for safety.
                 </div>
               </div>
 
@@ -2089,7 +2381,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 <div className="rounded-2xl border border-orange-100 bg-orange-50 p-3 text-xs leading-5 text-slate-600">
                   <strong className="text-[var(--color-navy)]">Safety:</strong>{" "}
                   changing stock through CSV records an inventory movement.
-                  Blank imageUrl removes the existing product image.
+                  A blank imageUrl keeps the existing product image. Use the
+                  image uploader to add photos after importing products.
                 </div>
 
                 <AdminSubmitButton
@@ -2104,111 +2397,125 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             </div>
           </details>
 
-          <div className="grid gap-4">
+          <div className="grid gap-3">
             {products.length ? (
               products.map((product) => {
                 const health = stockLevel(product);
-                const percent = stockPercent(product);
+                const canFeature = product.isActive && !product.archivedAt && product.categoryIsActive &&
+                  product.priceMinor > 0 && product.availableQuantity > 0 &&
+                  product.slug !== MPESA_SANDBOX_TEST_PRODUCT_SLUG &&
+                  Boolean(product.imageUrl && !product.imageUrl.startsWith("https://images.unsplash.com/"));
+                const canPublish = !product.isActive && !product.archivedAt && product.categoryIsActive &&
+                  product.priceMinor > 0 && product.availableQuantity > 0 &&
+                  product.slug !== MPESA_SANDBOX_TEST_PRODUCT_SLUG &&
+                  Boolean(product.imageUrl && !product.imageUrl.startsWith("https://images.unsplash.com/"));
 
                 return (
                   <article
                     key={product.id}
-                    className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                    id={`product-${product.id}`}
+                    className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
                   >
-                    <div className="grid gap-4 p-4 xl:grid-cols-[1fr_280px]">
-                      <div className="flex flex-col gap-4 sm:flex-row">
-                        <div className="h-28 w-full overflow-hidden rounded-2xl bg-slate-100 sm:w-28">
+                    <div className="flex flex-wrap items-center gap-3 p-3 sm:gap-4">
+                      <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
+                        <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-slate-100">
                           {product.imageUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={product.imageUrl}
                               alt=""
-                              className="h-full w-full object-cover"
+                              className="h-full w-full object-contain"
                             />
                           ) : (
-                            <Package className="m-10 h-8 w-8 text-slate-300" />
+                            <Package className="m-4 h-8 w-8 text-slate-300" />
                           )}
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="font-brand text-xl font-extrabold">
+                            <h3 className="font-brand text-sm font-extrabold sm:text-base">
                               {product.name}
                             </h3>
-                            {!product.isActive && <Badge>archived</Badge>}
+                            {product.archivedAt ? <Badge>archived</Badge> : product.isActive ? <Badge tone="green">active</Badge> : <Badge tone="orange">draft</Badge>}
                             {product.isFeatured && <Badge tone="orange">featured</Badge>}
                             <Badge tone={health.tone}>{health.label}</Badge>
                           </div>
                           <p className="mt-1 text-xs font-bold text-slate-500">
-                            {product.sku} · {product.categoryName} · {formatMoney(product.priceMinor)}
+                            {product.sku} · {product.categoryName} · {product.priceMinor === 0 && !product.isActive ? "Price pending" : formatMoney(product.priceMinor)}
                           </p>
-                          <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-500">
-                            {product.shortDescription || product.description || "No product description yet."}
+                          <p className="mt-1 text-xs text-slate-500">
+                            Available {product.availableQuantity} · Reserved {product.reservedQuantity} · Threshold {product.lowStockThreshold}
                           </p>
-                          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                            <Metric label="Available" value={product.availableQuantity} />
-                            <Metric label="Reserved" value={product.reservedQuantity} />
-                            <Metric label="Threshold" value={product.lowStockThreshold} />
-                          </div>
                         </div>
                       </div>
 
-                      <div className="rounded-2xl bg-slate-50 p-4">
-                        <div className="flex items-center justify-between text-xs font-extrabold text-slate-500">
-                          <span>Stock health</span>
-                          <span>{percent}%</span>
-                        </div>
-                        <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
-                          <div
-                            className={`h-full rounded-full ${
-                              health.tone === "red"
-                                ? "bg-red-500"
-                                : health.tone === "orange"
-                                  ? "bg-[var(--color-orange)]"
-                                  : "bg-[var(--color-green)]"
-                            }`}
-                            style={{ width: `${percent}%` }}
-                          />
-                        </div>
-                        <p className="mt-3 text-xs text-slate-500">
-                          Total stock {product.stockQuantity}; available after reservations {product.availableQuantity}.
-                        </p>
-                        <div className="mt-4 flex flex-wrap gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                           <Link
-                            href={`/products/${product.slug}`}
+                            href={adminHref("products", { ...productListValues, edit: product.id }, `product-${product.id}`)}
                             className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-extrabold text-[var(--color-navy)]"
                           >
-                            <Eye className="h-4 w-4" />
-                            Preview
+                            <Pencil className="h-4 w-4" /> Edit
                           </Link>
-                          <form action={archiveProduct}>
-                            <input type="hidden" name="productId" value={product.id} />
-                            <AdminSubmitButton
-                              confirmKind="archive"
-                              pendingLabel="Archiving..."
-                              className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-red-100 bg-white px-4 text-xs font-extrabold text-red-600"
+                          {product.isActive && !product.archivedAt && (
+                            <InlineFeaturedToggle
+                              productId={product.id}
+                              initialFeatured={product.isFeatured}
+                              canFeature={canFeature}
+                            />
+                          )}
+                          {product.isActive && !product.archivedAt && (
+                            <Link
+                              href={`/products/${product.slug}`}
+                              className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-extrabold text-[var(--color-navy)]"
                             >
-                              <Trash2 className="h-4 w-4" />
-                              Archive
+                              <Eye className="h-4 w-4" />
+                              Preview
+                            </Link>
+                          )}
+                          {!product.isActive && !product.archivedAt && (
+                            <form action={publishProduct}>
+                              <input type="hidden" name="productId" value={product.id} />
+                              <input type="hidden" name="returnTo" value={adminHref("products", productListValues)} />
+                              <span title={canPublish ? "Publish this product" : "Add a price, stock and real image, and use an active category before publishing."}>
+                                <AdminSubmitButton
+                                  disabled={!canPublish}
+                                  pendingLabel="Publishing..."
+                                  className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-[var(--color-green)] px-4 text-xs font-extrabold text-white"
+                                >
+                                  <CheckCircle2 className="h-4 w-4" /> Publish
+                                </AdminSubmitButton>
+                              </span>
+                            </form>
+                          )}
+                          <form action={product.archivedAt ? restoreProduct : archiveProduct}>
+                            <input type="hidden" name="productId" value={product.id} />
+                            <input type="hidden" name="returnTo" value={adminHref("products", productListValues)} />
+                            <AdminSubmitButton
+                              {...(product.archivedAt ? {} : { confirmKind: "archive" as const })}
+                              pendingLabel={product.archivedAt ? "Restoring..." : "Archiving..."}
+                              className={`inline-flex min-h-10 items-center gap-2 rounded-xl border bg-white px-4 text-xs font-extrabold ${product.archivedAt ? "border-slate-200 text-[var(--color-navy)]" : "border-red-100 text-red-600"}`}
+                            >
+                              {product.archivedAt ? <RotateCcw className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+                              {product.archivedAt ? "Restore to draft" : "Archive"}
                             </AdminSubmitButton>
                           </form>
-                        </div>
                       </div>
                     </div>
 
-                    <details className="border-t border-slate-100 bg-slate-50/70 p-4">
-                      <summary className="flex cursor-pointer items-center gap-2 text-sm font-extrabold">
-                        <Pencil className="h-4 w-4 text-[var(--color-green)]" />
-                        Edit product details
-                      </summary>
-                      <div className="mt-4 rounded-2xl bg-white p-4">
+                    {filters.editProductId === product.id && (
+                      <div className="border-t border-slate-100 bg-slate-50 p-4">
+                        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                          <h4 className="font-brand text-lg font-extrabold">Edit {product.name}</h4>
+                          <Link href={adminHref("products", productListValues, `product-${product.id}`)} className="text-sm font-bold text-[var(--color-green)]">Close editor</Link>
+                        </div>
                         <ProductForm
                           action={updateProduct}
                           categories={categories}
                           product={product}
                           submitLabel="Save product"
+                          returnTo={adminHref("products", { ...productListValues, edit: product.id })}
                         />
                       </div>
-                    </details>
+                    )}
                   </article>
                 );
               })
@@ -2225,6 +2532,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               </div>
             )}
           </div>
+          <AdminPager view="products" values={productListValues} pageKey="pp" page={productPage} total={productCounts.total} pageSize={productPageSize} />
         </section>
         )}
 
@@ -2247,25 +2555,39 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               <div className="grid grid-cols-3 gap-3 text-center text-xs">
                 <div className="rounded-2xl bg-white/15 p-3">
                   <strong className="font-brand block text-xl text-white">
-                    {lowStockProducts.length}
+                    {stats.lowStock}
                   </strong>
                   alerts
                 </div>
                 <div className="rounded-2xl bg-white/15 p-3">
                   <strong className="font-brand block text-xl text-white">
-                    {lowStockProducts.filter((product) => product.availableQuantity <= 0).length}
+                    {lowStockSummary.stockouts}
                   </strong>
                   stockouts
                 </div>
                 <div className="rounded-2xl bg-white/15 p-3">
                   <strong className="font-brand block text-xl text-white">
-                    {lowStockProducts.reduce((total, product) => total + reorderSuggestion(product), 0)}
+                    {lowStockSummary.suggested}
                   </strong>
                   suggested
                 </div>
               </div>
             </div>
           </div>
+
+          <form action="/admin#low-stock" className="mb-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[1fr_180px_auto]">
+            <input type="hidden" name="view" value="low-stock" />
+            <label className="grid gap-1 text-xs font-extrabold text-slate-600">
+              Find alert by name, SKU or category
+              <input name="lq" type="search" defaultValue={filters.lowStockQuery} placeholder="Search low-stock products" className="min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm" />
+            </label>
+            <SelectField name="ls" label="Stock state" defaultValue={filters.lowStockFilter} options={[
+              { value: "all", label: "All alerts" },
+              { value: "out", label: "Out of stock" },
+              { value: "low", label: "Low but in stock" }
+            ]} />
+            <button type="submit" className="self-end min-h-11 rounded-xl bg-[var(--color-navy)] px-5 text-sm font-extrabold text-white">Apply filters</button>
+          </form>
 
           <div className="grid gap-4 lg:grid-cols-3">
             {lowStockProducts.length ? (
@@ -2325,6 +2647,9 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     <form action={adjustInventory} className="grid gap-2 border-t border-orange-100 bg-white p-4">
                       <input type="hidden" name="productId" value={product.id} />
                       <input type="hidden" name="returnSection" value="low-stock" />
+                      <input type="hidden" name="returnPage" value={lowStockPage} />
+                      <input type="hidden" name="returnLowStockQuery" value={filters.lowStockQuery} />
+                      <input type="hidden" name="returnLowStockFilter" value={filters.lowStockFilter} />
                       <TextInput
                         name="quantityChange"
                         label="Restock quantity"
@@ -2348,14 +2673,15 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center lg:col-span-3">
                 <AlertTriangle className="mx-auto h-10 w-10 text-slate-300" />
                 <h3 className="font-brand mt-4 text-2xl font-extrabold">
-                  Stock is healthy right now
+                  {lowStockTotal ? "No alerts on this page" : filters.lowStockQuery || filters.lowStockFilter !== "all" ? "No alerts match these filters" : "Stock is healthy right now"}
                 </h3>
                 <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
-                  No low-stock products require action. The shelves are behaving.
+                  {filters.lowStockQuery || filters.lowStockFilter !== "all" ? "Try a different search or stock state." : "No low-stock products require action. The shelves are behaving."}
                 </p>
               </div>
             )}
           </div>
+          <AdminPager view="low-stock" values={lowStockListValues} pageKey="lp" page={lowStockPage} total={lowStockTotal} pageSize={lowStockPageSize} />
         </section>
         )}
 
@@ -2378,19 +2704,19 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               <div className="grid grid-cols-3 gap-3 text-center text-xs">
                 <div className="rounded-2xl bg-white/10 p-3">
                   <strong className="font-brand block text-xl text-white">
-                    {products.length}
+                    {stats.activeProducts}
                   </strong>
                   SKUs
                 </div>
                 <div className="rounded-2xl bg-white/10 p-3">
                   <strong className="font-brand block text-xl text-white">
-                    {products.reduce((total, product) => total + product.availableQuantity, 0)}
+                    {inventorySummary.availableUnits}
                   </strong>
                   available
                 </div>
                 <div className="rounded-2xl bg-white/10 p-3">
                   <strong className="font-brand block text-xl text-white">
-                    {movements.length}
+                    {inventorySummary.movementTotal}
                   </strong>
                   movements
                 </div>
@@ -2417,18 +2743,38 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 </div>
               </div>
 
-              <form action={adjustInventory} className="rounded-2xl bg-white p-4 shadow-sm">
+              <form action="/admin#inventory" className="mb-3 grid gap-2 sm:grid-cols-[1fr_auto]">
+                <input type="hidden" name="view" value="inventory" />
+                {filters.movementQuery && <input type="hidden" name="mq" value={filters.movementQuery} />}
+                <label className="grid gap-1 text-xs font-extrabold text-slate-600">
+                  Find product by name or SKU
+                  <input name="iq" type="search" defaultValue={filters.inventoryQuery} placeholder="Enter a product name or SKU" className="min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[var(--color-green)]" />
+                </label>
+                <button type="submit" className="self-end min-h-11 rounded-xl bg-[var(--color-navy)] px-5 text-sm font-extrabold text-white">Find product</button>
+              </form>
+              {filters.inventoryQuery && inventoryChoices.length === 25 && (
+                <p className="mb-3 text-xs text-amber-800">Showing the first 25 matches. Search by a more specific name or SKU if your product is not listed.</p>
+              )}
+              {filters.inventoryQuery && !inventoryChoices.length && (
+                <p className="mb-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">No active product matches that search. Try its exact SKU.</p>
+              )}
+
+              {inventoryChoices.length ? <form action={adjustInventory} className="rounded-2xl bg-white p-4 shadow-sm">
+                <input type="hidden" name="returnQuery" value={filters.inventoryQuery} />
+                {filters.movementQuery && <input type="hidden" name="returnMovementQuery" value={filters.movementQuery} />}
                 <div className="grid gap-3 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,.8fr)]">
                   <label className="grid min-w-0 gap-1 text-xs font-extrabold text-slate-600">
                     Product
                     <select
                       name="productId"
                       required
+                      defaultValue=""
                       className="min-h-11 min-w-0 max-w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[var(--color-navy)] outline-none focus:border-[var(--color-green)]"
                     >
-                      {products.map((product) => (
+                      <option value="" disabled>Choose a product</option>
+                      {inventoryChoices.map((product) => (
                         <option key={product.id} value={product.id}>
-                          {product.name} - available {product.availableQuantity}
+                          {product.sku} · {product.name} - available {product.availableQuantity}
                         </option>
                       ))}
                     </select>
@@ -2461,10 +2807,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   <Save className="h-4 w-4" />
                   Record movement
                 </AdminSubmitButton>
-              </form>
+              </form> : (
+                <p className="rounded-2xl bg-white p-5 text-sm text-slate-600">Search for a product above before recording a stock movement.</p>
+              )}
             </div>
 
-            <div className="rounded-3xl border border-slate-200 p-4">
+            <div id="movement-history" className="rounded-3xl border border-slate-200 p-4">
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <div className="grid h-11 w-11 place-items-center rounded-2xl bg-blue-50 text-blue-600">
@@ -2480,6 +2828,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   </div>
                 </div>
               </div>
+              <form action="/admin#movement-history" className="mb-4 flex flex-wrap gap-2">
+                <input type="hidden" name="view" value="inventory" />
+                {filters.inventoryQuery && <input type="hidden" name="iq" value={filters.inventoryQuery} />}
+                <input name="mq" type="search" aria-label="Search stock movements" defaultValue={filters.movementQuery} placeholder="Product, SKU or reason" className="min-h-10 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 text-sm" />
+                <button type="submit" className="min-h-10 rounded-xl bg-[var(--color-navy)] px-4 text-sm font-bold text-white">Search history</button>
+              </form>
               <div className="space-y-3">
                 {movements.length ? (
                   movements.map((movement) => (
@@ -2524,6 +2878,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   </div>
                 )}
               </div>
+              <AdminPager view="inventory" values={inventoryListValues} pageKey="mp" page={movementPage} total={movementTotal} pageSize={movementPageSize} anchor="movement-history" />
             </div>
           </div>
         </section>
@@ -3075,15 +3430,20 @@ function PriorityQueueBlock({
 
 function CategoryCard({ category }: { category: AdminCategory }) {
   const status = categoryStatus(category);
+  const categoryImageUrl = resolveCategoryImageUrl(
+    category.slug,
+    category.imageUrl
+  );
+  const isUsingDefaultImage = !category.imageUrl && Boolean(categoryImageUrl);
 
   return (
     <article className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
       <div className="grid gap-4 p-4 md:grid-cols-[150px_1fr]">
         <div className="h-36 overflow-hidden rounded-2xl bg-slate-100">
-          {category.imageUrl ? (
+          {categoryImageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={category.imageUrl}
+              src={categoryImageUrl}
               alt=""
               className="h-full w-full object-cover"
             />
@@ -3133,7 +3493,7 @@ function CategoryCard({ category }: { category: AdminCategory }) {
             </div>
             <div className="rounded-2xl bg-slate-50 p-3">
               <strong className="font-brand block text-lg font-black text-[var(--color-navy)]">
-                {category.imageUrl ? "Set" : "Missing"}
+                {category.imageUrl ? "Custom" : isUsingDefaultImage ? "Talomart default" : "Missing"}
               </strong>
               <span className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
                 Image

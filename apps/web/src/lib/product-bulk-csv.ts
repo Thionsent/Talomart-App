@@ -84,6 +84,10 @@ export function parseCsv(csv: string) {
   currentRow.push(currentCell);
   rows.push(currentRow);
 
+  if (inQuotes) {
+    throw new Error("The CSV contains an unfinished quoted value.");
+  }
+
   const nonEmptyRows = rows.filter((row) =>
     row.some((cell) => cell.trim().length > 0)
   );
@@ -100,6 +104,24 @@ export function parseCsv(csv: string) {
 
   if (unknownHeaders.length) {
     throw new Error(`Unknown CSV columns: ${unknownHeaders.join(", ")}`);
+  }
+
+  const duplicateHeaders = normalizedHeaders.filter(
+    (header, index) => normalizedHeaders.indexOf(header) !== index
+  );
+  if (duplicateHeaders.length) {
+    throw new Error(`Duplicate CSV columns: ${[...new Set(duplicateHeaders)].join(", ")}`);
+  }
+
+  for (const required of ["sku", "name", "slug", "categorySlug", "price", "stockQuantity"]) {
+    if (!normalizedHeaders.includes(required)) {
+      throw new Error(`Missing required CSV column: ${required}`);
+    }
+  }
+
+  const extraCellRow = dataRows.findIndex((row) => row.length > normalizedHeaders.length);
+  if (extraCellRow !== -1) {
+    throw new Error(`Row ${extraCellRow + 2}: more values than CSV columns.`);
   }
 
   return dataRows.map((row) => {

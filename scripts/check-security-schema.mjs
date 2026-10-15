@@ -1,4 +1,5 @@
 import postgres from "postgres";
+import { checkDataApiSecurity } from "./lib/check-data-api-security.mjs";
 
 const connectionString =
   process.env.DATABASE_DIRECT_URL ?? process.env.DATABASE_URL;
@@ -156,7 +157,7 @@ try {
     );
   }
 
-  const failures = [];
+  const failures = await sql.begin((transaction) => checkDataApiSecurity(transaction));
   if (missingTables.length) {
     failures.push(`missing tables: ${missingTables.join(", ")}`);
   }
@@ -194,7 +195,7 @@ try {
     process.exitCode = 1;
   } else {
     console.log(
-      "Security schema check passed: MFA, rate-limit, permission, audit and order-history tables exist; audit and order status events are append-only."
+      "Security schema check passed: all application tables have RLS; anon/authenticated have no table or column privileges and SELECT probes are denied; server access is preserved; audit and order status events are append-only."
     );
   }
 } finally {

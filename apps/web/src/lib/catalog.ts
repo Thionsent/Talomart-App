@@ -10,6 +10,15 @@ export interface StoreProduct {
   reviews: number;
   stock: number;
   image: string;
+  specifications?: Record<string, string>;
+}
+
+/** Unpublished catalogue items shown only in the local homepage preview. */
+export interface HomepagePreviewProduct {
+  sku: string;
+  name: string;
+  category: string;
+  image: string;
 }
 
 export interface StoreCategory {
@@ -17,15 +26,37 @@ export interface StoreCategory {
   slug: string;
   count: number;
   art: string;
+  /** The optional image selected by an administrator for this category. */
+  imageUrl?: string | null;
+}
+
+/**
+ * Talomart's supplied category artwork. An administrator-selected image always
+ * takes precedence, so these only make an unconfigured category look complete.
+ */
+export const defaultCategoryImages: Record<string, string> = {
+  phones: "/images/categories/phones.png",
+  audio: "/images/categories/audio.png",
+  charging: "/images/categories/charging.png",
+  storage: "/images/categories/storage.png",
+  cameras: "/images/categories/cameras.png",
+  accessories: "/images/categories/accessories.png"
+};
+
+export function resolveCategoryImageUrl(
+  slug: string,
+  imageUrl?: string | null
+) {
+  return imageUrl || defaultCategoryImages[slug.toLowerCase()] || null;
 }
 
 export const storefrontCategories: StoreCategory[] = [
-  { name: "Phones", slug: "phones", count: 86, art: "📱" },
-  { name: "Audio", slug: "audio", count: 124, art: "🎧" },
-  { name: "Charging", slug: "charging", count: 98, art: "🔋" },
-  { name: "Storage", slug: "storage", count: 56, art: "💾" },
-  { name: "Cameras", slug: "cameras", count: 42, art: "📷" },
-  { name: "Accessories", slug: "accessories", count: 173, art: "⌚" }
+  { name: "Phones", slug: "phones", count: 86, art: "📱", imageUrl: resolveCategoryImageUrl("phones") },
+  { name: "Audio", slug: "audio", count: 124, art: "🎧", imageUrl: resolveCategoryImageUrl("audio") },
+  { name: "Charging", slug: "charging", count: 98, art: "🔋", imageUrl: resolveCategoryImageUrl("charging") },
+  { name: "Storage", slug: "storage", count: 56, art: "💾", imageUrl: resolveCategoryImageUrl("storage") },
+  { name: "Cameras", slug: "cameras", count: 42, art: "📷", imageUrl: resolveCategoryImageUrl("cameras") },
+  { name: "Accessories", slug: "accessories", count: 173, art: "⌚", imageUrl: resolveCategoryImageUrl("accessories") }
 ];
 
 export const storefrontProducts: StoreProduct[] = [

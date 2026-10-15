@@ -21,6 +21,7 @@ const permissionLabels: Record<StaffPermission, string> = {
   "orders.manage": "Manage orders, payment state and fulfilment",
   "customers.read": "View customer records",
   "analytics.read": "View sales analytics",
+  "homepage.manage": "Manage homepage content",
   "staff.manage": "Assign staff permissions",
   "audit.read": "Read administrator audit records"
 };

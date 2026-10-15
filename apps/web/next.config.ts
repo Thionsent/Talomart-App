@@ -15,7 +15,12 @@ const nextConfig: NextConfig = {
     formats: ["image/avif", "image/webp"]
   },
   experimental: {
-    optimizePackageImports: ["lucide-react"]
+    optimizePackageImports: ["lucide-react"],
+    serverActions: {
+      // Admin image uploads are validated to 5MB by supabase-storage.ts.
+      // Leave a small allowance for multipart form fields and boundaries.
+      bodySizeLimit: "6mb"
+    }
   },
   async headers() {
     return [

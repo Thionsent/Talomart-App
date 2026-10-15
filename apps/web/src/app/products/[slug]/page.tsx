@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ProductActions } from "@/components/catalog/product-actions";
 import { ProductGrid } from "@/components/catalog/product-grid";
 import { getProductBySlug, getProducts } from "@/lib/catalog-queries";
+import { absoluteUrl, isPlaceholderCatalogueImage, privatePageRobots, publicPageMetadata, safeJsonLd, siteUrl } from "@/lib/seo";
 
 const formatPrice = (value: number) =>
   new Intl.NumberFormat("en-KE").format(value);
@@ -16,10 +17,14 @@ export async function generateMetadata({ params }: ProductPageProps) {
   const { slug } = await params;
   const product = await getProductBySlug(slug);
 
-  return {
-    title: product?.name ?? "Product details",
-    description: product?.shortDescription ?? product?.description
-  };
+  if (!product) return { title: "Product not found", robots: privatePageRobots };
+
+  return publicPageMetadata(
+    product.name,
+    product.shortDescription ?? product.description ?? `Shop ${product.name} at Talomart Stores in Kenya.`,
+    `/products/${encodeURIComponent(product.slug)}`,
+    isPlaceholderCatalogueImage(product.image) ? null : product.image
+  );
 }
 
 export default async function ProductPage({ params }: ProductPageProps) {
@@ -33,9 +38,35 @@ export default async function ProductPage({ params }: ProductPageProps) {
       limit: 4
     })
   ).filter((item) => item.id !== product.id);
+  const productImages = product.images
+    .filter(({ url }) => !isPlaceholderCatalogueImage(url))
+    .map(({ url }) => absoluteUrl(url));
 
   return (
     <section className="bg-[var(--color-cream)] py-10">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: safeJsonLd({
+            "@context": "https://schema.org",
+            "@type": "Product",
+            "@id": absoluteUrl(`/products/${encodeURIComponent(product.slug)}`),
+            name: product.name,
+            description: product.description ?? product.shortDescription ?? product.name,
+            sku: product.sku,
+            ...(productImages.length ? { image: productImages } : {}),
+            category: product.category,
+            offers: {
+              "@type": "Offer",
+              url: absoluteUrl(`/products/${encodeURIComponent(product.slug)}`),
+              priceCurrency: "KES",
+              price: product.price,
+              availability: `https://schema.org/${product.stock > 0 ? "InStock" : "OutOfStock"}`,
+              seller: { "@id": `${siteUrl}/#store` }
+            }
+          })
+        }}
+      />
       <div className="page-shell">
         <div className="grid gap-8 rounded-3xl bg-white p-5 shadow-sm lg:grid-cols-[1.05fr_0.95fr] lg:p-8">
           <div className="overflow-hidden rounded-3xl bg-slate-100">
@@ -43,7 +74,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
             <img
               src={product.image}
               alt={product.name}
-              className="aspect-[4/3] h-full w-full object-cover"
+              className="aspect-[4/3] h-full w-full object-contain"
             />
           </div>
 

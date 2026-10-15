@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   BarChart3,
   ClipboardList,
+  LayoutTemplate,
   MailWarning,
   Menu,
   Package,
@@ -28,6 +29,7 @@ export type AdminNavigationKey =
   | "customers"
   | "analytics"
   | "categories"
+  | "homepage"
   | "notifications"
   | "security"
   | "audit";
@@ -56,7 +58,8 @@ const operationalNavigation = [
   { key: "orders", href: "/admin?view=orders", label: "Orders", icon: ShoppingCart },
   { key: "customers", href: "/admin?view=customers", label: "Customers", icon: Users },
   { key: "analytics", href: "/admin?view=analytics", label: "Analytics", icon: BarChart3 },
-  { key: "categories", href: "/admin?view=categories", label: "Categories", icon: ClipboardList }
+  { key: "categories", href: "/admin?view=categories", label: "Categories", icon: ClipboardList },
+  { key: "homepage", href: "/admin/homepage", label: "Homepage", icon: LayoutTemplate }
 ] as const;
 
 export function AdminDashboardShell({
@@ -120,7 +123,7 @@ export function AdminDashboardShell({
 
         <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-6">
           <aside className="hidden lg:block">
-            <div className="sticky top-6 rounded-3xl bg-[var(--color-navy)] p-5 text-white shadow-sm">
+            <div className="sticky top-4 max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain rounded-3xl bg-[var(--color-navy)] p-5 text-white shadow-sm">
               <Link href="/admin" className="flex items-center gap-3">
                 <span className="brand-mark" aria-hidden="true" />
                 <span>

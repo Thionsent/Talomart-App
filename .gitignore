@@ -32,6 +32,12 @@ Thumbs.db
 # Local infrastructure data
 .docker-data/
 
+# Local import sources and generated working files (not deployment assets)
+.pnpm-store/
+.tmp/
+outputs/
+assets/inventory-images-*/
+
 # Test artifacts
 playwright-report/
 test-results/

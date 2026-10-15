@@ -8,25 +8,17 @@ export function SiteFooter() {
       <div className="container footer-main">
         <div className="footer-brand-column">
           <Link
-            className="brand footer-brand"
             href="/"
             aria-label="Talomart Stores home"
           >
-            <span className="brand-mark">
-              <span />
-            </span>
-            <span className="brand-name">
-              Talo<span>mart</span>
-              <small>STORES</small>
-            </span>
+            <Image
+              src="/talomart-logo.png"
+              alt="Talomart Stores"
+              width={112}
+              height={112}
+              className="rounded-2xl"
+            />
           </Link>
-          <Image
-            src="/talomart-logo.png"
-            alt="Talomart Stores"
-            width={112}
-            height={112}
-            className="mt-4 rounded-2xl"
-          />
           <p>
             Genuine electrical accessories and mobile gear, backed by helpful
             local support from Talomart Stores.

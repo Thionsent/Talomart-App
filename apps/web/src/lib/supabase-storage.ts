@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import { isExistingBucketResponse } from "./supabase-storage-response";
 
 const acceptedImageTypes = [
   "image/jpeg",
@@ -9,7 +10,7 @@ const acceptedImageTypes = [
 
 const maxImageSizeBytes = 5 * 1024 * 1024;
 
-type UploadFolder = "products" | "categories";
+type UploadFolder = "products" | "categories" | "homepage";
 
 const bucketName = env.SUPABASE_STORAGE_BUCKET;
 
@@ -72,11 +73,19 @@ async function ensurePublicBucket(config: NonNullable<ReturnType<typeof storageC
     })
   });
 
-  if (response.ok || response.status === 409) {
+  if (response.ok) {
     return;
   }
 
   const message = await response.text();
+
+  // Supabase Storage currently reports an existing bucket as HTTP 400 while
+  // carrying statusCode "409" and code "BucketAlreadyExists" in the body.
+  // Treat every documented duplicate representation as an idempotent success.
+  if (isExistingBucketResponse(response.status, message)) {
+    return;
+  }
+
   throw new Error(
     `Could not prepare Supabase Storage bucket "${bucketName}". ${message}`
   );
@@ -100,6 +109,13 @@ export async function uploadAdminImageFromForm(
     return null;
   }
 
+  return uploadAdminImage(file, { folder, slug });
+}
+
+export async function uploadAdminImage(
+  file: File,
+  { folder, slug }: { folder: UploadFolder; slug: string }
+) {
   if (!acceptedImageTypes.includes(file.type)) {
     throw new Error("Upload a JPG, PNG, WebP or AVIF image.");
   }
@@ -124,6 +140,13 @@ export async function uploadAdminImageFromForm(
     objectPath
   )}`;
 
+  // Files reconstructed from a Server Action can have a different runtime
+  // representation from files read by a Route Handler. Send plain bytes so
+  // the storage request never tries to serialize the File as an object.
+  const imageBytes = new Uint8Array(await file.arrayBuffer());
+  if (imageBytes.byteLength !== file.size) {
+    throw new Error("The image could not be read completely. Choose the image again and retry.");
+  }
   const response = await fetch(uploadUrl, {
     method: "POST",
     headers: {
@@ -132,7 +155,7 @@ export async function uploadAdminImageFromForm(
       "Content-Type": file.type,
       "x-upsert": "false"
     },
-    body: file
+    body: imageBytes
   });
 
   if (!response.ok) {

@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-const publicPages = ["/", "/help", "/contact", "/returns", "/shipping", "/warranty", "/payments", "/about", "/sign-in", "/sign-up"];
+const publicPages = ["/", "/offers", "/help", "/contact", "/returns", "/shipping", "/warranty", "/payments", "/about", "/sign-in", "/sign-up"];
 
 test.describe("public customer pages", () => {
   for (const path of publicPages) {
@@ -11,6 +11,16 @@ test.describe("public customer pages", () => {
       await expect(page.locator("body")).not.toContainText("Internal Server Error");
     });
   }
+});
+
+test("Today's Deals offers usable filters and a clear empty state", async ({ page }) => {
+  await page.goto("/offers");
+  await expect(page.getByRole("heading", { name: "Today's Deals" })).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "Search deals" })).toBeVisible();
+  await page.getByRole("searchbox", { name: "Search deals" }).fill("unlikely-product-name-xyz");
+  await page.getByRole("button", { name: "Show deals" }).click();
+  await expect(page.getByRole("heading", { name: "No deals match those filters" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Clear filters" })).toBeVisible();
 });
 
 test("footer exposes real support channels and no app-store placeholders", async ({ page }) => {

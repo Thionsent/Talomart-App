@@ -308,7 +308,7 @@ export function CheckoutPageClient({
                   <img
                     src={item.product.image}
                     alt=""
-                    className="h-16 w-16 rounded-xl object-cover"
+                    className="h-16 w-16 rounded-xl object-contain"
                   />
                   <div className="flex-1">
                     <h3 className="line-clamp-2 text-sm font-bold">

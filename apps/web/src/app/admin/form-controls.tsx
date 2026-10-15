@@ -9,6 +9,7 @@ type AdminSubmitButtonProps = {
   pendingLabel?: string;
   confirmMessage?: string;
   confirmKind?: ConfirmKind;
+  disabled?: boolean;
   className: string;
 };
 
@@ -46,6 +47,7 @@ export function AdminSubmitButton({
   pendingLabel = "Working...",
   confirmMessage,
   confirmKind,
+  disabled = false,
   className
 }: AdminSubmitButtonProps) {
   const { pending } = useFormStatus();
@@ -53,7 +55,7 @@ export function AdminSubmitButton({
   return (
     <button
       type="submit"
-      disabled={pending}
+      disabled={pending || disabled}
       aria-busy={pending}
       onClick={(event) => {
         const message =

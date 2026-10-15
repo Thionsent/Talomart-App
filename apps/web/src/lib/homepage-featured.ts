@@ -1,0 +1,1 @@
+export const HOMEPAGE_FEATURED_LIMIT = 10;

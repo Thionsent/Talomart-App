@@ -3,7 +3,8 @@ import { ResetPasswordForm } from "@/components/auth/reset-password-form";
 export const dynamic = "force-dynamic";
 export const metadata = {
   title: "Choose a new password",
-  description: "Securely update your Talomart customer password."
+  description: "Securely update your Talomart customer password.",
+  robots: { index: false, follow: false }
 };
 
 type ResetPasswordPageProps = {

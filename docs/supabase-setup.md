@@ -75,11 +75,14 @@ Set these in the hosting provider's encrypted secret manager:
 
 Use separate Supabase projects for staging and production.
 
-After applying migrations, verify the privileged security schema and append-only audit trigger:
+After applying migrations, verify RLS, denied Data API access, the privileged security schema and append-only audit triggers:
 
 ```powershell
 npm run security:check
 ```
+
+See the [security findings investigation](supabase-security-findings.md) for the
+30-table access review, rollback-only migration preview, and live Advisor checks.
 
 ## Official references
 

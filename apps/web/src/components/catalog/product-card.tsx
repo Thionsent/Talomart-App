@@ -1,11 +1,12 @@
 "use client";
 
-import { Heart, ShoppingBag, Star } from "lucide-react";
+import { Heart, ShoppingBag } from "lucide-react";
 import Link from "next/link";
 
 import type { CatalogueProduct } from "@/lib/catalog-queries";
 import { isUuidCartProductId } from "@/lib/cart-product-id";
 import { useWishlist } from "@/components/wishlist/wishlist-provider";
+import { productCardSpecifications } from "@/lib/product-card-specifications";
 
 const formatPrice = (value: number) =>
   new Intl.NumberFormat("en-KE").format(value);
@@ -15,6 +16,7 @@ export function ProductCard({ product }: { product: CatalogueProduct }) {
   const saved = isSaved(product.id);
   const pending = pendingIds.has(product.id);
   const purchasable = isUuidCartProductId(product.id);
+  const highlights = productCardSpecifications(product.specifications, product.name);
 
   return (
     <article className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:border-[var(--color-green)] hover:shadow-xl">
@@ -29,7 +31,7 @@ export function ProductCard({ product }: { product: CatalogueProduct }) {
           <img
             src={product.image}
             alt={product.name}
-            className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+            className="h-full w-full object-cover transition duration-500 group-hover:brightness-95"
           />
         </div>
       </Link>
@@ -38,9 +40,6 @@ export function ProductCard({ product }: { product: CatalogueProduct }) {
           <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-[var(--color-green)]">
             {product.category}
           </span>
-          <span className="flex items-center gap-1 text-xs font-bold text-amber-500">
-            <Star className="h-3.5 w-3.5 fill-current" /> 4.8
-          </span>
         </div>
         <Link
           href={`/products/${product.slug}`}
@@ -48,9 +47,19 @@ export function ProductCard({ product }: { product: CatalogueProduct }) {
         >
           {product.name}
         </Link>
-        <p className="line-clamp-2 min-h-10 text-sm leading-5 text-slate-500">
-          {product.shortDescription ?? product.description}
-        </p>
+        {highlights.length > 0 ? (
+          <div className="flex min-h-10 flex-wrap content-start gap-x-3 gap-y-1 text-xs leading-5 text-slate-600">
+            {highlights.map(({ label, detail }) => (
+              <span key={label} className="max-w-full truncate" title={`${label}: ${detail}`}>
+                <strong className="text-[var(--color-navy)]">{label}:</strong> {detail}
+              </span>
+            ))}
+          </div>
+        ) : (product.shortDescription || product.description) ? (
+          <p className="line-clamp-2 min-h-10 text-sm leading-5 text-slate-500">
+            {product.shortDescription ?? product.description}
+          </p>
+        ) : null}
         <div>
           <strong className="text-xl text-[var(--color-navy)]">
             KSh {formatPrice(product.price)}

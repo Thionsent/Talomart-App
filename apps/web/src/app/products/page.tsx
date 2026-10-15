@@ -1,8 +1,13 @@
 import { ProductGrid } from "@/components/catalog/product-grid";
 import { ProductToolbar } from "@/components/catalog/product-toolbar";
 import { getCategories, getProducts } from "@/lib/catalog-queries";
+import { publicPageMetadata } from "@/lib/seo";
 
-export const metadata = { title: "All products" };
+export const metadata = publicPageMetadata(
+  "Shop phones and tech accessories",
+  "Browse Talomart's phones, headphones, chargers, power banks, storage and other tech accessories in Kenya.",
+  "/products"
+);
 export const revalidate = 60;
 
 interface ProductsPageProps {

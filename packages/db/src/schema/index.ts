@@ -33,6 +33,7 @@ export const staffPermissionEnum = pgEnum("staff_permission", [
   "orders.manage",
   "customers.read",
   "analytics.read",
+  "homepage.manage",
   "staff.manage",
   "audit.read"
 ]);
@@ -92,7 +93,7 @@ export const users = pgTable(
     ...timestamps
   },
   (table) => [uniqueIndex("user_email_unique").on(table.email)]
-);
+).enableRLS();
 
 export const sessions = pgTable(
   "session",
@@ -111,7 +112,7 @@ export const sessions = pgTable(
     uniqueIndex("session_token_unique").on(table.token),
     index("session_user_idx").on(table.userId)
   ]
-);
+).enableRLS();
 
 export const accounts = pgTable(
   "account",
@@ -142,7 +143,7 @@ export const accounts = pgTable(
     ),
     index("account_user_idx").on(table.userId)
   ]
-);
+).enableRLS();
 
 export const verifications = pgTable(
   "verification",
@@ -154,7 +155,7 @@ export const verifications = pgTable(
     ...timestamps
   },
   (table) => [index("verification_identifier_idx").on(table.identifier)]
-);
+).enableRLS();
 
 export const categories = pgTable(
   "categories",
@@ -169,7 +170,66 @@ export const categories = pgTable(
     ...timestamps
   },
   (table) => [uniqueIndex("category_slug_unique").on(table.slug)]
-);
+).enableRLS();
+
+export const homepageSections = pgTable(
+  "homepage_sections",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    slot: text("slot").notNull(),
+    eyebrow: text("eyebrow"),
+    title: text("title").notNull(),
+    body: text("body"),
+    imageUrl: text("image_url"),
+    ctaLabel: text("cta_label"),
+    ctaHref: text("cta_href"),
+    isActive: boolean("is_active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    ...timestamps
+  },
+  (table) => [
+    uniqueIndex("homepage_section_slot_unique").on(table.slot),
+    index("homepage_section_schedule_idx").on(
+      table.isActive,
+      table.startsAt,
+      table.endsAt
+    )
+  ]
+).enableRLS();
+
+export const homepageBanners = pgTable(
+  "homepage_banners",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: text("name").notNull(),
+    eyebrow: text("eyebrow"),
+    title: text("title").notNull(),
+    body: text("body"),
+    imageUrl: text("image_url").notNull(),
+    mobileImageUrl: text("mobile_image_url"),
+    altText: text("alt_text").notNull(),
+    ctaLabel: text("cta_label"),
+    ctaHref: text("cta_href"),
+    tone: text("tone").notNull().default("navy"),
+    isActive: boolean("is_active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    focalPointX: integer("focal_point_x").notNull().default(50),
+    focalPointY: integer("focal_point_y").notNull().default(50),
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    ...timestamps
+  },
+  (table) => [
+    index("homepage_banner_schedule_idx").on(
+      table.isActive,
+      table.startsAt,
+      table.endsAt
+    ),
+    index("homepage_banner_sort_idx").on(table.sortOrder, table.createdAt)
+  ]
+).enableRLS();
 
 export const products = pgTable(
   "products",
@@ -189,6 +249,7 @@ export const products = pgTable(
     lowStockThreshold: integer("low_stock_threshold").notNull().default(5),
     reservedQuantity: integer("reserved_quantity").notNull().default(0),
     isActive: boolean("is_active").notNull().default(true),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
     isFeatured: boolean("is_featured").notNull().default(false),
     specifications: jsonb("specifications")
       .$type<Record<string, string>>()
@@ -200,12 +261,13 @@ export const products = pgTable(
     uniqueIndex("product_sku_unique").on(table.sku),
     uniqueIndex("product_slug_unique").on(table.slug),
     index("product_category_idx").on(table.categoryId),
+    index("product_archived_at_idx").on(table.archivedAt),
     index("product_active_featured_idx").on(
       table.isActive,
       table.isFeatured
     )
   ]
-);
+).enableRLS();
 
 export const productImages = pgTable(
   "product_images",
@@ -220,7 +282,7 @@ export const productImages = pgTable(
     ...timestamps
   },
   (table) => [index("product_image_product_idx").on(table.productId)]
-);
+).enableRLS();
 
 export const addresses = pgTable(
   "addresses",
@@ -240,7 +302,7 @@ export const addresses = pgTable(
     ...timestamps
   },
   (table) => [index("address_user_idx").on(table.userId)]
-);
+).enableRLS();
 
 export const carts = pgTable(
   "carts",
@@ -257,7 +319,7 @@ export const carts = pgTable(
     index("cart_user_idx").on(table.userId),
     uniqueIndex("cart_guest_token_unique").on(table.guestToken)
   ]
-);
+).enableRLS();
 
 export const cartItems = pgTable(
   "cart_items",
@@ -276,7 +338,7 @@ export const cartItems = pgTable(
     uniqueIndex("cart_product_unique").on(table.cartId, table.productId),
     index("cart_item_cart_idx").on(table.cartId)
   ]
-);
+).enableRLS();
 
 export const wishlists = pgTable(
   "wishlists",
@@ -288,7 +350,7 @@ export const wishlists = pgTable(
     ...timestamps
   },
   (table) => [uniqueIndex("wishlist_user_unique").on(table.userId)]
-);
+).enableRLS();
 
 export const wishlistItems = pgTable(
   "wishlist_items",
@@ -308,7 +370,7 @@ export const wishlistItems = pgTable(
       table.productId
     )
   ]
-);
+).enableRLS();
 
 export const orders = pgTable(
   "orders",
@@ -346,7 +408,7 @@ export const orders = pgTable(
     index("order_user_idx").on(table.userId),
     index("order_status_created_idx").on(table.status, table.createdAt)
   ]
-);
+).enableRLS();
 
 export const orderStatusHistory = pgTable(
   "order_status_history",
@@ -373,7 +435,7 @@ export const orderStatusHistory = pgTable(
     ),
     index("order_status_history_actor_idx").on(table.actorId)
   ]
-);
+).enableRLS();
 
 export const twoFactors = pgTable(
   "two_factors",
@@ -394,7 +456,7 @@ export const twoFactors = pgTable(
     uniqueIndex("two_factor_user_unique").on(table.userId),
     index("two_factor_secret_idx").on(table.secret)
   ]
-);
+).enableRLS();
 
 export const authRateLimits = pgTable(
   "auth_rate_limits",
@@ -405,7 +467,7 @@ export const authRateLimits = pgTable(
     lastRequest: bigint("last_request", { mode: "number" }).notNull()
   },
   (table) => [uniqueIndex("auth_rate_limit_key_unique").on(table.key)]
-);
+).enableRLS();
 
 export const staffPermissions = pgTable(
   "staff_permissions",
@@ -427,7 +489,7 @@ export const staffPermissions = pgTable(
     ),
     index("staff_permission_user_idx").on(table.userId)
   ]
-);
+).enableRLS();
 
 export const adminAuditLogs = pgTable(
   "admin_audit_logs",
@@ -460,7 +522,7 @@ export const adminAuditLogs = pgTable(
     ),
     index("admin_audit_created_idx").on(table.createdAt)
   ]
-);
+).enableRLS();
 
 export const endpointRateLimits = pgTable(
   "endpoint_rate_limits",
@@ -475,7 +537,7 @@ export const endpointRateLimits = pgTable(
       .defaultNow()
   },
   (table) => [index("endpoint_rate_limit_updated_idx").on(table.updatedAt)]
-);
+).enableRLS();
 
 export const orderLookupRateLimits = pgTable(
   "order_lookup_rate_limits",
@@ -492,7 +554,7 @@ export const orderLookupRateLimits = pgTable(
   (table) => [
     index("order_lookup_rate_limit_updated_idx").on(table.updatedAt)
   ]
-);
+).enableRLS();
 
 export const orderItems = pgTable(
   "order_items",
@@ -512,7 +574,7 @@ export const orderItems = pgTable(
     ...timestamps
   },
   (table) => [index("order_item_order_idx").on(table.orderId)]
-);
+).enableRLS();
 
 export const checkoutSessions = pgTable(
   "checkout_sessions",
@@ -552,7 +614,7 @@ export const checkoutSessions = pgTable(
     index("checkout_guest_token_idx").on(table.guestToken),
     uniqueIndex("checkout_converted_order_unique").on(table.convertedOrderId)
   ]
-);
+).enableRLS();
 
 export const payments = pgTable(
   "payments",
@@ -587,7 +649,7 @@ export const payments = pgTable(
     index("payment_order_idx").on(table.orderId),
     index("payment_status_idx").on(table.status)
   ]
-);
+).enableRLS();
 
 export const fulfillments = pgTable(
   "fulfillments",
@@ -612,7 +674,7 @@ export const fulfillments = pgTable(
     index("fulfillment_tracking_idx").on(table.trackingNumber),
     index("fulfillment_status_idx").on(table.status)
   ]
-);
+).enableRLS();
 
 export const inventoryMovements = pgTable(
   "inventory_movements",
@@ -640,7 +702,7 @@ export const inventoryMovements = pgTable(
     ),
     index("inventory_order_idx").on(table.orderId)
   ]
-);
+).enableRLS();
 
 export const notificationEvents = pgTable(
   "notification_events",
@@ -682,7 +744,7 @@ export const notificationEvents = pgTable(
       table.nextAttemptAt
     )
   ]
-);
+).enableRLS();
 
 export const emailWebhookEvents = pgTable(
   "email_webhook_events",
@@ -701,7 +763,7 @@ export const emailWebhookEvents = pgTable(
     index("email_webhook_provider_idx").on(table.providerMessageId),
     index("email_webhook_created_idx").on(table.eventCreatedAt)
   ]
-);
+).enableRLS();
 
 export const reviews = pgTable(
   "reviews",
@@ -733,4 +795,4 @@ export const reviews = pgTable(
       table.isApproved
     )
   ]
-);
+).enableRLS();

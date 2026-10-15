@@ -9,6 +9,8 @@ import {
   GUEST_ACCOUNT_SCOPE
 } from "@/lib/browser-account-scope";
 import { env } from "@/lib/env";
+import { businessInfo } from "@/lib/business-info";
+import { absoluteUrl, isIndexableDeployment, safeJsonLd, siteUrl } from "@/lib/seo";
 import {
   getServerCart,
   LEGACY_SERVER_CART_COOKIE,
@@ -18,25 +20,28 @@ import {
 import "./globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(
-    process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
-  ),
+  metadataBase: new URL(siteUrl),
   title: {
     default: "Talomart Stores — Powering your connections",
     template: "%s | Talomart Stores"
   },
   description:
-    "Shop genuine phones, audio, charging, storage, cameras and smart accessories from Talomart Stores.",
+    "Shop phones, audio, charging, storage and smart accessories at Talomart Stores in Kenya. Browse the latest products and get support from our team in Sirari, Migori.",
+  robots: isIndexableDeployment ? undefined : { index: false, follow: false },
   icons: {
     icon: "/talomart-logo.png",
     apple: "/talomart-logo.png"
   },
   openGraph: {
     title: "Talomart Stores",
-    description: "Smart tech. Fair prices. Reliable service.",
+    description: "Shop phones and tech accessories at Talomart Stores in Kenya.",
+    url: siteUrl,
+    siteName: businessInfo.name,
+    locale: "en_KE",
     type: "website",
     images: [{ url: "/talomart-logo.png", width: 1280, height: 1280, alt: "Talomart Stores" }]
-  }
+  },
+  twitter: { card: "summary_large_image" }
 };
 
 export default async function RootLayout({
@@ -90,6 +95,28 @@ export default async function RootLayout({
       data-cart-scope={accountScope}
     >
       <body>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: safeJsonLd({
+              "@context": "https://schema.org",
+              "@type": "Store",
+              "@id": `${siteUrl}/#store`,
+              name: businessInfo.name,
+              url: siteUrl,
+              logo: absoluteUrl("/talomart-logo.png"),
+              email: businessInfo.supportEmail,
+              telephone: businessInfo.phone,
+              address: {
+                "@type": "PostalAddress",
+                addressLocality: "Sirari",
+                addressRegion: "Migori",
+                addressCountry: "KE"
+              },
+              sameAs: Object.values(businessInfo.social)
+            })
+          }}
+        />
         <ApplicationShell
           accountScope={accountScope}
           customer={customer}

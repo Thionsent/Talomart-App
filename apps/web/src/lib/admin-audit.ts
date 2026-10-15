@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import type { AdminPrincipal } from "./admin-authorization";
 import { env } from "./env";
 
-type SqlRunner = typeof sql;
+type SqlRunner = typeof sql | import("postgres").TransactionSql;
 
 type AdminAuditEvent = {
   action: string;

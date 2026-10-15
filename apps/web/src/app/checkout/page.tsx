@@ -15,7 +15,7 @@ import {
 } from "@/lib/server-cart";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Checkout" };
+export const metadata = { title: "Checkout", robots: { index: false, follow: false } };
 
 export default async function CheckoutPage() {
   const [cookieStore, requestHeaders] = await Promise.all([cookies(), headers()]);

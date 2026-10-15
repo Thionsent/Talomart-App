@@ -1,6 +1,7 @@
 import { LegalPage } from "@/components/legal/legal-page";
+import { publicPageMetadata } from "@/lib/seo";
 
-export const metadata = { title: "Terms of Use" };
+export const metadata = publicPageMetadata("Terms of Use", "Read the terms for using Talomart Stores, creating an account and placing an order.", "/terms");
 
 export default function TermsPage() {
   return (

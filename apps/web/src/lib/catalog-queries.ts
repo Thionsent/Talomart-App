@@ -1,11 +1,17 @@
 import { sql } from "@talomart/db";
 
-import { storefrontCategories, storefrontProducts } from "@/lib/catalog";
+import {
+  resolveCategoryImageUrl,
+  storefrontCategories,
+  storefrontProducts
+} from "@/lib/catalog";
 import {
   hasConfiguredDatabase,
   logFallback,
   withTimeout
 } from "@/lib/database-resilience";
+import { MPESA_SANDBOX_TEST_PRODUCT_SLUG } from "@/lib/payments/mpesa-sandbox-product";
+import { normalizeProductSpecifications } from "@/lib/product-specifications";
 
 export interface CatalogueCategory {
   id: string;
@@ -51,12 +57,14 @@ function toDiscount(priceMinor: number, compareAtPriceMinor: number | null) {
 }
 
 function fallbackCategories(): CatalogueCategory[] {
+  if (process.env.NODE_ENV === "production") return [];
+
   return storefrontCategories.map((category) => ({
       id: category.slug,
       name: category.name,
       slug: category.slug,
       description: null,
-      imageUrl: null,
+      imageUrl: resolveCategoryImageUrl(category.slug, category.imageUrl),
       count: category.count
   }));
 }
@@ -80,6 +88,7 @@ export async function getCategories(): Promise<CatalogueCategory[]> {
         left join products p
           on p.category_id = c.id
           and p.is_active = true
+          and p.slug <> ${MPESA_SANDBOX_TEST_PRODUCT_SLUG}
         where c.is_active = true
         group by c.id
         order by c.sort_order asc, c.name asc
@@ -87,7 +96,12 @@ export async function getCategories(): Promise<CatalogueCategory[]> {
       { label: "Category catalogue" }
     );
 
-    return categories.length ? categories : fallbackCategories();
+    return categories.length
+      ? categories.map((category) => ({
+          ...category,
+          imageUrl: resolveCategoryImageUrl(category.slug, category.imageUrl)
+        }))
+      : fallbackCategories();
   } catch (error) {
     logFallback("Category catalogue is unavailable", error);
     return fallbackCategories();
@@ -99,8 +113,9 @@ export async function getProducts(options?: {
   query?: string | undefined;
   sort?: string | undefined;
   limit?: number | undefined;
+  dealsOnly?: boolean | undefined;
 }): Promise<CatalogueProduct[]> {
-  const fallback = storefrontProducts
+  const fallback = (process.env.NODE_ENV === "production" ? [] : storefrontProducts)
     .filter((product) => {
       const categoryMatches =
         !options?.categorySlug ||
@@ -111,6 +126,7 @@ export async function getProducts(options?: {
 
       return categoryMatches && queryMatches;
     })
+    .filter((product) => !options?.dealsOnly || (product.discount > 0 && product.stock > 0))
     .map((product) => ({
       ...product,
       sku: product.id,
@@ -124,7 +140,7 @@ export async function getProducts(options?: {
     }));
 
   if (!hasConfiguredDatabase()) {
-    return fallback;
+    return options?.dealsOnly ? [] : fallback;
   }
 
   let rows: {
@@ -167,6 +183,10 @@ export async function getProducts(options?: {
             select pi.url
             from product_images pi
             where pi.product_id = p.id
+              and (
+                ${options?.dealsOnly ?? false} = false
+                or (pi.url <> '' and pi.url not like 'https://images.unsplash.com/%')
+              )
             order by pi.sort_order asc, pi.created_at asc
             limit 1
           ) as image
@@ -174,6 +194,21 @@ export async function getProducts(options?: {
         inner join categories c on c.id = p.category_id
         where p.is_active = true
           and c.is_active = true
+          and p.slug <> ${MPESA_SANDBOX_TEST_PRODUCT_SLUG}
+          and (
+            ${options?.dealsOnly ?? false} = false
+            or (
+              p.price_minor > 0
+              and p.compare_at_price_minor > p.price_minor
+              and p.stock_quantity > p.reserved_quantity
+              and exists (
+                select 1 from product_images deal_image
+                where deal_image.product_id = p.id
+                  and deal_image.url <> ''
+                  and deal_image.url not like 'https://images.unsplash.com/%'
+              )
+            )
+          )
           and (${options?.categorySlug ?? null}::text is null or c.slug = ${options?.categorySlug ?? null})
           and (
             ${options?.query ?? null}::text is null
@@ -182,6 +217,9 @@ export async function getProducts(options?: {
             or c.name ilike '%' || ${options?.query ?? null} || '%'
           )
         order by
+          case when ${options?.sort ?? "featured"} = 'savings' then
+            (p.compare_at_price_minor - p.price_minor)::numeric / nullif(p.compare_at_price_minor, 0)
+          end desc,
           case when ${options?.sort ?? "featured"} = 'price-low' then p.price_minor end asc,
           case when ${options?.sort ?? "featured"} = 'price-high' then p.price_minor end desc,
           case when ${options?.sort ?? "featured"} = 'newest' then p.created_at end desc,
@@ -193,7 +231,7 @@ export async function getProducts(options?: {
     );
   } catch (error) {
     logFallback("Product catalogue is unavailable", error);
-    return fallback;
+    return options?.dealsOnly ? [] : fallback;
   }
 
   return rows.map((product) => {
@@ -216,7 +254,7 @@ export async function getProducts(options?: {
       lowStockThreshold: product.lowStockThreshold,
       image,
       images: [{ url: image, altText: product.name }],
-      specifications: product.specifications ?? {},
+      specifications: normalizeProductSpecifications(product.specifications),
       isFeatured: product.isFeatured
     };
   });
@@ -312,7 +350,7 @@ export async function getProductBySlug(slug: string) {
     lowStockThreshold: product.lowStockThreshold,
     image,
     images: [{ url: image, altText: product.name }],
-    specifications: product.specifications ?? {},
+    specifications: normalizeProductSpecifications(product.specifications),
     isFeatured: product.isFeatured
   };
 }

@@ -14,6 +14,7 @@ export const staffPermissionValues = [
   "orders.manage",
   "customers.read",
   "analytics.read",
+  "homepage.manage",
   "staff.manage",
   "audit.read"
 ] as const;
@@ -107,6 +108,7 @@ export function permissionForAdminView(view: string): StaffPermission {
   if (view === "orders") return "orders.manage";
   if (view === "customers") return "customers.read";
   if (view === "analytics") return "analytics.read";
+  if (view === "homepage") return "homepage.manage";
   if (view === "security") return "staff.manage";
   if (view === "audit") return "audit.read";
   return "analytics.read";

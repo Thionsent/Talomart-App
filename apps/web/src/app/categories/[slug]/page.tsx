@@ -3,12 +3,26 @@ import { notFound } from "next/navigation";
 import { ProductGrid } from "@/components/catalog/product-grid";
 import { ProductToolbar } from "@/components/catalog/product-toolbar";
 import { getCategories, getProducts } from "@/lib/catalog-queries";
+import { publicPageMetadata, privatePageRobots } from "@/lib/seo";
 
 export const revalidate = 60;
 
 interface CategoryPageProps {
   params: Promise<{ slug: string }>;
   searchParams: Promise<{ q?: string; sort?: string }>;
+}
+
+export async function generateMetadata({ params }: CategoryPageProps) {
+  const { slug } = await params;
+  const category = (await getCategories()).find((item) => item.slug === slug);
+  if (!category) return { title: "Category not found", robots: privatePageRobots };
+
+  return publicPageMetadata(
+    category.name,
+    category.description ?? `Browse ${category.name.toLowerCase()} at Talomart Stores in Kenya.`,
+    `/categories/${encodeURIComponent(category.slug)}`,
+    category.imageUrl
+  );
 }
 
 export default async function CategoryPage({

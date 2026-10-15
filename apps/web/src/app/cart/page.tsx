@@ -14,7 +14,7 @@ import {
   serverCartCookieName
 } from "@/lib/server-cart";
 
-export const metadata = { title: "Shopping cart" };
+export const metadata = { title: "Shopping cart", robots: { index: false, follow: false } };
 
 export default async function CartPage() {
   const [cookieStore, requestHeaders] = await Promise.all([cookies(), headers()]);

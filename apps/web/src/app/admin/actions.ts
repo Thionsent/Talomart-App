@@ -11,7 +11,6 @@ import {
   type StaffPermission
 } from "@/lib/admin-authorization";
 import { recordAdminAudit } from "@/lib/admin-audit";
-import { serializeDatabaseJson } from "@/lib/database-json";
 import {
   enqueueOrderEmail,
   processPendingTransactionalEmails,
@@ -26,6 +25,8 @@ import {
 import { recordOrderStatusTransition } from "@/lib/order-status-history";
 import { parseCsv, specificationsFromCsv } from "@/lib/product-bulk-csv";
 import { uploadAdminImageFromForm } from "@/lib/supabase-storage";
+import { MPESA_SANDBOX_TEST_PRODUCT_SLUG } from "@/lib/payments/mpesa-sandbox-product";
+import { HOMEPAGE_FEATURED_LIMIT } from "@/lib/homepage-featured";
 
 const orderStatuses = [
   "pending_payment",
@@ -87,6 +88,47 @@ function fail(section: string, error: unknown) {
   redirect(
     `/admin?view=${encodeURIComponent(section)}&error=${encodeURIComponent(message)}#${section}`
   );
+}
+
+function productReturn(formData: FormData, message: string, kind: "notice" | "error") {
+  const destination = text(formData, "returnTo");
+  const params = new URLSearchParams({ view: "products" });
+  try {
+    const candidate = new URL(destination || "/admin?view=products", "https://talomart.invalid");
+    if (candidate.origin === "https://talomart.invalid" && candidate.pathname === "/admin" && candidate.searchParams.get("view") === "products") {
+      for (const key of ["pq", "ps", "category", "stock", "sort", "pp", "edit"]) {
+        const item = candidate.searchParams.get(key);
+        if (item && item.length <= 120) params.set(key, item);
+      }
+    }
+  } catch {
+    // Malformed return locations fall back to the products overview.
+  }
+  params.set(kind, message);
+  revalidatePath("/admin");
+  redirect(`/admin?${params.toString()}#products`);
+}
+
+function inventoryReturn(formData: FormData, message: string, kind: "notice" | "error") {
+  const query = text(formData, "returnQuery").trim().slice(0, 120);
+  const movementQuery = text(formData, "returnMovementQuery").trim().slice(0, 120);
+  const params = new URLSearchParams({ view: "inventory", [kind]: message });
+  if (query) params.set("iq", query);
+  if (movementQuery) params.set("mq", movementQuery);
+  revalidatePath("/admin");
+  redirect(`/admin?${params.toString()}#inventory`);
+}
+
+function lowStockReturn(formData: FormData, message: string, kind: "notice" | "error") {
+  const rawPage = text(formData, "returnPage");
+  const query = text(formData, "returnLowStockQuery").trim().slice(0, 120);
+  const filter = text(formData, "returnLowStockFilter");
+  const params = new URLSearchParams({ view: "low-stock", [kind]: message });
+  if (/^[1-9]\d{0,5}$/.test(rawPage)) params.set("lp", rawPage);
+  if (query) params.set("lq", query);
+  if (filter === "out" || filter === "low") params.set("ls", filter);
+  revalidatePath("/admin");
+  redirect(`/admin?${params.toString()}#low-stock`);
 }
 
 async function recordOrderEvent(
@@ -257,14 +299,21 @@ const productSchema = z.object({
   shortDescription: z.string().trim().max(240).nullable(),
   description: z.string().trim().max(4000).nullable(),
   imageUrl: z.string().trim().url().nullable(),
-  priceMinor: z.number().int().min(1),
+  priceMinor: z.number().int().min(0),
   compareAtPriceMinor: z.number().int().min(1).nullable(),
   stockQuantity: z.number().int().min(0),
   lowStockThreshold: z.number().int().min(0),
   isActive: z.boolean(),
   isFeatured: z.boolean(),
   specifications: z.record(z.string(), z.string())
+}).refine((product) => !product.isActive || product.priceMinor > 0, {
+  message: "Set a selling price before publishing this product.",
+  path: ["priceMinor"]
 });
+
+function productSpecificationsJson(specifications: Record<string, string>) {
+  return JSON.stringify(specifications);
+}
 
 const bulkImportModes = ["upsert", "create", "update"] as const;
 
@@ -285,7 +334,7 @@ async function productFromForm(formData: FormData) {
     stockQuantity: integer(formData, "stockQuantity"),
     lowStockThreshold: integer(formData, "lowStockThreshold", 5),
     isActive: checked(formData, "isActive"),
-    isFeatured: checked(formData, "isFeatured"),
+    isFeatured: false,
     specifications: parseSpecifications(text(formData, "specifications"))
   });
 
@@ -315,8 +364,8 @@ function csvMoneyMinor(value: string, column: string) {
 
   if (!normalized) return null;
 
-  const parsed = Number.parseFloat(normalized);
-  if (!Number.isFinite(parsed)) {
+  const parsed = Number(normalized);
+  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(normalized) || !Number.isFinite(parsed)) {
     throw new Error(`Invalid ${column} value "${value}".`);
   }
 
@@ -326,8 +375,9 @@ function csvMoneyMinor(value: string, column: string) {
 function csvInteger(value: string, column: string, fallback: number) {
   if (!value.trim()) return fallback;
 
-  const parsed = Number.parseInt(value.trim(), 10);
-  if (!Number.isInteger(parsed)) {
+  const normalized = value.trim();
+  const parsed = Number(normalized);
+  if (!/^\d+$/.test(normalized) || !Number.isSafeInteger(parsed)) {
     throw new Error(`Invalid ${column} value "${value}".`);
   }
 
@@ -349,6 +399,7 @@ export async function createProduct(formData: FormData) {
   const actor = await requireAdmin("catalog.manage");
   try {
   const product = await productFromForm(formData);
+  const specificationsJson = productSpecificationsJson(product.specifications);
 
   const createdRows = await sql<{ id: string }[]>`
     insert into products (
@@ -378,8 +429,8 @@ export async function createProduct(formData: FormData) {
       ${product.stockQuantity},
       ${product.lowStockThreshold},
       ${product.isActive},
-      ${product.isFeatured},
-      ${serializeDatabaseJson(product.specifications)}::jsonb
+      false,
+      ${specificationsJson}::jsonb
     )
     returning id::text
   `;
@@ -416,64 +467,201 @@ export async function createProduct(formData: FormData) {
   finish("products", "Product created successfully.");
 }
 
-export async function updateProduct(formData: FormData) {
+async function updateProductRecord(formData: FormData) {
   const actor = await requireAdmin("catalog.manage");
-  try {
   const productId = z.string().uuid().parse(text(formData, "productId"));
   const product = await productFromForm(formData);
+  const specificationsJson = productSpecificationsJson(product.specifications);
+  let stage = "saving the product record";
 
-  await sql`
-    update products
-    set
-      category_id = ${product.categoryId}::uuid,
-      sku = ${product.sku},
-      name = ${product.name},
-      slug = ${product.slug},
-      short_description = ${product.shortDescription},
-      description = ${product.description},
-      price_minor = ${product.priceMinor},
-      compare_at_price_minor = ${product.compareAtPriceMinor},
-      stock_quantity = greatest(${product.stockQuantity}, reserved_quantity),
-      low_stock_threshold = ${product.lowStockThreshold},
-      is_active = ${product.isActive},
-      is_featured = ${product.isFeatured},
-      specifications = ${serializeDatabaseJson(product.specifications)}::jsonb,
-      updated_at = now()
-    where id = ${productId}::uuid
-  `;
+  try {
+    await sql.begin(async (transaction) => {
+      const [current] = await transaction<{ archivedAt: Date | null; isActive: boolean }[]>`
+        select archived_at as "archivedAt", is_active as "isActive"
+        from products where id = ${productId}::uuid for update
+      `;
+      if (!current) throw new Error("This product no longer exists.");
+      if (current.archivedAt && product.isActive) {
+        throw new Error("Restore this archived product to a draft before publishing it.");
+      }
+      if (!current.isActive && product.isActive) {
+        throw new Error("Save this product as a draft, then use Publish after checking its price, stock and image.");
+      }
+      await transaction`
+        update products
+        set
+          category_id = ${product.categoryId}::uuid,
+          sku = ${product.sku},
+          name = ${product.name},
+          slug = ${product.slug},
+          short_description = ${product.shortDescription},
+          description = ${product.description},
+          price_minor = ${product.priceMinor},
+          compare_at_price_minor = ${product.compareAtPriceMinor},
+          stock_quantity = greatest(${product.stockQuantity}, reserved_quantity),
+          low_stock_threshold = ${product.lowStockThreshold},
+          is_active = ${current.archivedAt ? false : product.isActive},
+          is_featured = case when ${current.archivedAt ? false : product.isActive} then is_featured else false end,
+          specifications = ${specificationsJson}::jsonb,
+          updated_at = now()
+        where id = ${productId}::uuid
+      `;
 
-  await sql`delete from product_images where product_id = ${productId}::uuid`;
+      stage = "saving the product image";
+      await transaction`delete from product_images where product_id = ${productId}::uuid`;
 
-  if (product.imageUrl) {
-    await sql`
-      insert into product_images (product_id, url, alt_text, sort_order)
-      values (${productId}::uuid, ${product.imageUrl}, ${product.name}, 0)
-    `;
+      if (product.imageUrl) {
+        await transaction`
+          insert into product_images (product_id, url, alt_text, sort_order)
+          values (${productId}::uuid, ${product.imageUrl}, ${product.name}, 0)
+        `;
+      }
+
+      stage = "writing the admin audit record";
+      await recordAdminAudit(transaction, actor, {
+        action: "product.update",
+        resourceType: "product",
+        resourceId: productId,
+        summary: `Updated product ${product.sku}`,
+        after: {
+          sku: product.sku,
+          name: product.name,
+          priceMinor: product.priceMinor,
+          stockQuantity: product.stockQuantity,
+          isActive: product.isActive
+        }
+      });
+    });
+  } catch (error) {
+    const diagnostic = error instanceof Error
+      ? `${error.name}: ${error.message}\n${error.stack ?? ""}`
+      : `${typeof error}: ${Object.prototype.toString.call(error)}`;
+    console.error(`[admin] Product update failed while ${stage}.\n${diagnostic}`);
+    throw new Error(`Could not save the product while ${stage}: ${actionErrorMessage(error)}`);
   }
-
-  await recordAdminAudit(sql, actor, {
-    action: "product.update",
-    resourceType: "product",
-    resourceId: productId,
-    summary: `Updated product ${product.sku}`,
-    after: {
-      sku: product.sku,
-      name: product.name,
-      priceMinor: product.priceMinor,
-      stockQuantity: product.stockQuantity,
-      isActive: product.isActive
-    }
-  });
 
   revalidatePath("/admin");
   revalidatePath("/");
   revalidatePath("/products");
   revalidatePath(`/products/${product.slug}`);
+}
+
+export async function updateProduct(formData: FormData) {
+  try {
+    await updateProductRecord(formData);
   } catch (error) {
-    fail("products", error);
+    productReturn(formData, actionErrorMessage(error), "error");
   }
 
-  finish("products", "Product updated successfully.");
+  productReturn(formData, "Product updated successfully.", "notice");
+}
+
+export async function updateProductInline(formData: FormData) {
+  try {
+    await updateProductRecord(formData);
+    return { ok: true, message: "Product saved successfully." };
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+}
+
+async function setProductFeaturedRecord(formData: FormData) {
+  const actor = await requireAdmin("catalog.manage");
+    const productId = z.string().uuid().parse(text(formData, "productId"));
+    const featured = z.enum(["true", "false"]).parse(text(formData, "featured")) === "true";
+
+    const product = await sql.begin(async (transaction) => {
+      // Serialize competing admin selections so the homepage never exceeds its limit.
+      await transaction`select pg_advisory_xact_lock(hashtext('talomart-featured-products'))`;
+
+      const [row] = await transaction<{
+        sku: string;
+        slug: string;
+        isFeatured: boolean;
+        isActive: boolean;
+        categoryActive: boolean;
+        available: number;
+        priceMinor: number;
+        hasImage: boolean;
+      }[]>`
+        select p.sku, p.slug, p.is_featured as "isFeatured",
+          p.is_active as "isActive", c.is_active as "categoryActive",
+          (p.stock_quantity - p.reserved_quantity)::int as available,
+          p.price_minor as "priceMinor",
+          exists (
+            select 1 from product_images pi
+            where pi.product_id = p.id and pi.url <> ''
+              and pi.url not like 'https://images.unsplash.com/%'
+          ) as "hasImage"
+        from products p
+        join categories c on c.id = p.category_id
+        where p.id = ${productId}::uuid
+        for update of p
+      `;
+
+      if (!row) throw new Error("This product no longer exists.");
+
+      if (featured) {
+        if (!row.isActive || !row.categoryActive) {
+          throw new Error("Publish the product and its category before featuring it.");
+        }
+        if (row.priceMinor <= 0 || row.available <= 0 || !row.hasImage || row.slug === MPESA_SANDBOX_TEST_PRODUCT_SLUG) {
+          throw new Error("Featured products need a price, available stock and a real image.");
+        }
+        if (!row.isFeatured) {
+          const countRows = await transaction<{ count: number }[]>`
+            select count(*)::int as count from products where is_featured = true
+          `;
+          if ((countRows[0]?.count ?? 0) >= HOMEPAGE_FEATURED_LIMIT) {
+            throw new Error(`The homepage can feature up to ${HOMEPAGE_FEATURED_LIMIT} products. Remove one first.`);
+          }
+        }
+      }
+
+      await transaction`
+        update products set is_featured = ${featured}, updated_at = now()
+        where id = ${productId}::uuid
+      `;
+      return row;
+    });
+
+    await recordAdminAudit(sql, actor, {
+      action: "product.featured.update",
+      resourceType: "product",
+      resourceId: productId,
+      summary: `${featured ? "Featured" : "Unfeatured"} product ${product.sku}`,
+      before: { isFeatured: product.isFeatured },
+      after: { isFeatured: featured }
+    });
+
+    revalidatePath("/admin");
+    revalidatePath("/admin/homepage");
+    revalidatePath("/");
+    return featured;
+}
+
+export async function setProductFeatured(formData: FormData) {
+  let featured = false;
+  try {
+    featured = await setProductFeaturedRecord(formData);
+  } catch (error) {
+    productReturn(formData, actionErrorMessage(error), "error");
+  }
+
+  productReturn(formData, featured ? "Product added to Featured picks." : "Product removed from Featured picks.", "notice");
+}
+
+export async function setProductFeaturedInline(formData: FormData) {
+  try {
+    const featured = await setProductFeaturedRecord(formData);
+    return {
+      ok: true,
+      featured,
+      message: featured ? "Added to Featured picks." : "Removed from Featured picks."
+    };
+  } catch (error) {
+    return { ok: false, featured: null, message: actionErrorMessage(error) };
+  }
 }
 
 export async function archiveProduct(formData: FormData) {
@@ -481,28 +669,100 @@ export async function archiveProduct(formData: FormData) {
   try {
   const productId = z.string().uuid().parse(text(formData, "productId"));
 
-  await sql`
+  const archived = await sql<{ id: string }[]>`
     update products
-    set is_active = false, is_featured = false, updated_at = now()
-    where id = ${productId}::uuid
+    set is_active = false, is_featured = false, archived_at = now(), updated_at = now()
+    where id = ${productId}::uuid and archived_at is null
+    returning id::text
   `;
+  if (!archived.length) throw new Error("This product is already archived or no longer exists.");
 
   await recordAdminAudit(sql, actor, {
     action: "product.archive",
     resourceType: "product",
     resourceId: productId,
     summary: "Archived a product",
-    after: { isActive: false, isFeatured: false }
+    after: { isActive: false, isFeatured: false, archived: true }
   });
 
   revalidatePath("/admin");
   revalidatePath("/");
   revalidatePath("/products");
   } catch (error) {
-    fail("products", error);
+    productReturn(formData, actionErrorMessage(error), "error");
   }
 
-  finish("products", "Product archived.");
+  productReturn(formData, "Product archived.", "notice");
+}
+
+export async function restoreProduct(formData: FormData) {
+  const actor = await requireAdmin("catalog.manage");
+  try {
+    const productId = z.string().uuid().parse(text(formData, "productId"));
+    const restored = await sql<{ id: string }[]>`
+      update products
+      set archived_at = null, is_active = false, is_featured = false, updated_at = now()
+      where id = ${productId}::uuid and archived_at is not null
+      returning id::text
+    `;
+    if (!restored.length) throw new Error("This product is not archived or no longer exists.");
+    await recordAdminAudit(sql, actor, {
+      action: "product.restore",
+      resourceType: "product",
+      resourceId: productId,
+      summary: "Restored a product to draft",
+      after: { isActive: false, isFeatured: false, archived: false }
+    });
+    revalidatePath("/admin");
+  } catch (error) {
+    productReturn(formData, actionErrorMessage(error), "error");
+  }
+  productReturn(formData, "Product restored to draft. Review it before publishing.", "notice");
+}
+
+export async function publishProduct(formData: FormData) {
+  const actor = await requireAdmin("catalog.manage");
+  try {
+    const productId = z.string().uuid().parse(text(formData, "productId"));
+    const product = await sql.begin(async (transaction) => {
+      const [row] = await transaction<{
+        sku: string; slug: string; isActive: boolean; archivedAt: Date | null;
+        categoryActive: boolean; priceMinor: number; available: number; hasImage: boolean;
+      }[]>`
+        select p.sku, p.slug, p.is_active as "isActive", p.archived_at as "archivedAt",
+          c.is_active as "categoryActive", p.price_minor as "priceMinor",
+          (p.stock_quantity - p.reserved_quantity)::int as available,
+          exists (
+            select 1 from product_images pi where pi.product_id = p.id and pi.url <> ''
+              and pi.url not like 'https://images.unsplash.com/%'
+          ) as "hasImage"
+        from products p join categories c on c.id = p.category_id
+        where p.id = ${productId}::uuid for update of p
+      `;
+      if (!row) throw new Error("This product no longer exists.");
+      if (row.archivedAt) throw new Error("Restore this product to a draft before publishing it.");
+      if (row.isActive) throw new Error("This product is already active.");
+      if (!row.categoryActive || row.priceMinor <= 0 || row.available <= 0 || !row.hasImage || row.slug === MPESA_SANDBOX_TEST_PRODUCT_SLUG) {
+        throw new Error("Publishing needs an active category, selling price, available stock and a real product image.");
+      }
+      await transaction`
+        update products set is_active = true, updated_at = now()
+        where id = ${productId}::uuid
+      `;
+      return row;
+    });
+    await recordAdminAudit(sql, actor, {
+      action: "product.publish", resourceType: "product", resourceId: productId,
+      summary: `Published product ${product.sku}`, after: { isActive: true }
+    });
+    revalidatePath("/admin");
+    revalidatePath("/");
+    revalidatePath("/products");
+    revalidatePath(`/products/${product.slug}`);
+  } catch (error) {
+    productReturn(formData, actionErrorMessage(error), "error");
+  }
+  productReturn(formData, "Product published.", "notice");
 }
 
 export async function bulkImportProducts(formData: FormData) {
@@ -527,13 +787,27 @@ export async function bulkImportProducts(formData: FormData) {
       throw new Error("Import 500 products or fewer at a time.");
     }
 
-    const categories = await sql<{ id: string; slug: string }[]>`
-      select id::text, slug
+    const seenSkus = new Set<string>();
+    const seenSlugs = new Set<string>();
+    for (const [index, row] of rows.entries()) {
+      const sku = row.sku.trim().toLowerCase();
+      const slug = row.slug.trim().toLowerCase();
+      if (sku && seenSkus.has(sku)) {
+        throw new Error(`Row ${index + 2}: duplicate SKU in CSV: ${row.sku}.`);
+      }
+      if (slug && seenSlugs.has(slug)) {
+        throw new Error(`Row ${index + 2}: duplicate slug in CSV: ${row.slug}.`);
+      }
+      seenSkus.add(sku);
+      seenSlugs.add(slug);
+    }
+
+    const categories = await sql<{ id: string; slug: string; isActive: boolean }[]>`
+      select id::text, slug, is_active as "isActive"
       from categories
-      where is_active = true
     `;
     const categoryBySlug = new Map(
-      categories.map((category) => [category.slug, category.id])
+      categories.map((category) => [category.slug, category])
     );
 
     const skus = rows.map((row) => row.sku.trim()).filter(Boolean);
@@ -545,6 +819,7 @@ export async function bulkImportProducts(formData: FormData) {
             slug: string;
             reservedQuantity: number;
             stockQuantity: number;
+            archivedAt: Date | null;
           }[]
         >`
           select
@@ -552,7 +827,8 @@ export async function bulkImportProducts(formData: FormData) {
             sku,
             slug,
             reserved_quantity as "reservedQuantity",
-            stock_quantity as "stockQuantity"
+            stock_quantity as "stockQuantity",
+            archived_at as "archivedAt"
           from products
           where sku = any(${skus}::text[])
         `
@@ -590,15 +866,24 @@ export async function bulkImportProducts(formData: FormData) {
           throw new Error(`Row ${rowNumber}: categorySlug is required.`);
         }
 
-        const categoryId = categoryBySlug.get(row.categorySlug);
-        if (!categoryId) {
+        const category = categoryBySlug.get(row.categorySlug);
+        if (!category) {
           throw new Error(
-            `Row ${rowNumber}: category "${row.categorySlug}" does not exist or is archived.`
+            `Row ${rowNumber}: category "${row.categorySlug}" does not exist.`
+          );
+        }
+        if (!category.isActive && csvBoolean(row.isActive, false)) {
+          throw new Error(
+            `Row ${rowNumber}: activate category "${row.categorySlug}" before publishing this product.`
           );
         }
 
         if (mode === "create" && existing) {
           throw new Error(`Row ${rowNumber}: SKU "${row.sku}" already exists.`);
+        }
+
+        if (existing?.archivedAt && mode !== "create") {
+          throw new Error(`Row ${rowNumber}: SKU "${row.sku}" is archived. Restore it to a draft before importing updates.`);
         }
 
         if (mode === "update" && !existing) {
@@ -614,7 +899,7 @@ export async function bulkImportProducts(formData: FormData) {
         }
 
         const product = productSchema.parse({
-          categoryId,
+          categoryId: category.id,
           sku: row.sku,
           name: row.name,
           slug: row.slug,
@@ -629,7 +914,7 @@ export async function bulkImportProducts(formData: FormData) {
             "lowStockThreshold",
             5
           ),
-          isActive: csvBoolean(row.isActive, true),
+          isActive: csvBoolean(row.isActive, false),
           isFeatured: csvBoolean(row.isFeatured, false),
           specifications: specificationsFromCsv(row.specifications)
         });
@@ -641,6 +926,7 @@ export async function bulkImportProducts(formData: FormData) {
         }
 
         if (existing) {
+          const specificationsJson = productSpecificationsJson(product.specifications);
           await transaction`
             update products
             set
@@ -656,7 +942,7 @@ export async function bulkImportProducts(formData: FormData) {
               low_stock_threshold = ${product.lowStockThreshold},
               is_active = ${product.isActive},
               is_featured = ${product.isFeatured},
-              specifications = ${serializeDatabaseJson(product.specifications)}::jsonb,
+              specifications = ${specificationsJson}::jsonb,
               updated_at = now()
             where id = ${existing.id}::uuid
           `;
@@ -683,17 +969,29 @@ export async function bulkImportProducts(formData: FormData) {
             `;
           }
 
-          await transaction`delete from product_images where product_id = ${existing.id}::uuid`;
-
           if (product.imageUrl) {
-            await transaction`
-              insert into product_images (product_id, url, alt_text, sort_order)
-              values (${existing.id}::uuid, ${product.imageUrl}, ${product.name}, 0)
+            const [primaryImage] = await transaction<{ id: string }[]>`
+              select id::text from product_images
+              where product_id = ${existing.id}::uuid
+              order by sort_order, created_at limit 1
             `;
+            if (primaryImage) {
+              await transaction`
+                update product_images
+                set url = ${product.imageUrl}, alt_text = ${product.name}, updated_at = now()
+                where id = ${primaryImage.id}::uuid
+              `;
+            } else {
+              await transaction`
+                insert into product_images (product_id, url, alt_text, sort_order)
+                values (${existing.id}::uuid, ${product.imageUrl}, ${product.name}, 0)
+              `;
+            }
           }
 
           updated += 1;
         } else {
+          const specificationsJson = productSpecificationsJson(product.specifications);
           const [inserted] = await transaction<{ id: string }[]>`
             insert into products (
               category_id,
@@ -723,7 +1021,7 @@ export async function bulkImportProducts(formData: FormData) {
               ${product.lowStockThreshold},
               ${product.isActive},
               ${product.isFeatured},
-              ${serializeDatabaseJson(product.specifications)}::jsonb
+              ${specificationsJson}::jsonb
             )
             returning id::text
           `;
@@ -1000,10 +1298,12 @@ export async function adjustInventory(formData: FormData) {
   revalidatePath("/");
   revalidatePath("/products");
   } catch (error) {
-    fail(returnSection, error);
+    if (returnSection === "inventory") inventoryReturn(formData, actionErrorMessage(error), "error");
+    lowStockReturn(formData, actionErrorMessage(error), "error");
   }
 
-  finish(returnSection, "Inventory movement recorded.");
+  if (returnSection === "inventory") inventoryReturn(formData, "Inventory movement recorded.", "notice");
+  lowStockReturn(formData, "Inventory movement recorded.", "notice");
 }
 
 async function applyOrderStatusTransition(

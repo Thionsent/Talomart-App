@@ -13,7 +13,7 @@ import {
 import { sql } from "@talomart/db";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "My account" };
+export const metadata = { title: "My account", robots: { index: false, follow: false } };
 
 type AccountOrder = {
   orderNumber: string;

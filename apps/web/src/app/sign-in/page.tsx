@@ -4,7 +4,7 @@ import { safeCustomerDestination } from "@/lib/auth-redirect";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-export const metadata = { title: "Sign in" };
+export const metadata = { title: "Sign in", robots: { index: false, follow: false } };
 export const dynamic = "force-dynamic";
 
 type SignInPageProps = {

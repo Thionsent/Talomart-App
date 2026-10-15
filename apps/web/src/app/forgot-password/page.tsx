@@ -2,7 +2,8 @@ import { PasswordResetRequestForm } from "@/components/auth/password-reset-reque
 
 export const metadata = {
   title: "Reset password",
-  description: "Request a secure Talomart customer password reset link."
+  description: "Request a secure Talomart customer password reset link.",
+  robots: { index: false, follow: false }
 };
 
 export default function ForgotPasswordPage() {

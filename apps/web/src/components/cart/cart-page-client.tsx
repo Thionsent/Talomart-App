@@ -158,7 +158,7 @@ export function CartPageClient({
                   <img
                     src={item.product.image}
                     alt={item.product.name}
-                    className="h-28 w-full rounded-2xl object-cover sm:w-28"
+                    className="h-28 w-full rounded-2xl object-contain sm:w-28"
                   />
                   <div>
                     <span className="text-xs font-bold text-[var(--color-green)]">

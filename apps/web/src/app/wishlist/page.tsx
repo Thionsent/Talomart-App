@@ -1,7 +1,7 @@
 import { WishlistPageClient } from "@/components/wishlist/wishlist-page-client";
 import { getProducts } from "@/lib/catalog-queries";
 
-export const metadata = { title: "My wishlist" };
+export const metadata = { title: "My wishlist", robots: { index: false, follow: false } };
 export const revalidate = 60;
 
 export default async function WishlistPage() {

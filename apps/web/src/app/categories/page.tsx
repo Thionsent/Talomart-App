@@ -1,8 +1,13 @@
 import Link from "next/link";
 
 import { getCategories } from "@/lib/catalog-queries";
+import { publicPageMetadata } from "@/lib/seo";
 
-export const metadata = { title: "Product categories" };
+export const metadata = publicPageMetadata(
+  "Shop by category",
+  "Explore Talomart's phones, audio, charging, storage, cameras and accessories categories.",
+  "/categories"
+);
 export const revalidate = 60;
 
 function categoryFallbackIcon(slug: string) {
