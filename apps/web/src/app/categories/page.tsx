@@ -1,7 +1,10 @@
 import Link from "next/link";
+import Image from "next/image";
 
 import { getCategories } from "@/lib/catalog-queries";
+import { defaultCategoryImages } from "@/lib/catalog";
 import { publicPageMetadata } from "@/lib/seo";
+import { canOptimizeStoreImage } from "@/lib/storefront-image";
 
 export const metadata = publicPageMetadata(
   "Shop by category",
@@ -46,14 +49,13 @@ export default async function CategoriesPage() {
               className="group rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-[var(--color-green)] hover:shadow-xl"
             >
               <div className="flex items-center justify-between">
-                <span className="grid h-20 w-24 overflow-hidden rounded-2xl bg-emerald-50 text-3xl">
-                  {category.imageUrl ? (
+                <span className="relative grid h-20 w-24 overflow-hidden rounded-2xl bg-emerald-50 text-3xl">
+                  {category.imageUrl && Object.values(defaultCategoryImages).includes(category.imageUrl) ? (
+                    // Bundled category images are already small WebP files.
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={category.imageUrl}
-                      alt=""
-                      className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                    />
+                    <img src={category.imageUrl} alt="" width={160} height={160} loading="lazy" decoding="async" className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
+                  ) : category.imageUrl ? (
+                    <Image src={category.imageUrl} alt="" fill sizes="96px" loading="lazy" unoptimized={!canOptimizeStoreImage(category.imageUrl)} className="object-cover transition duration-300 group-hover:scale-105" />
                   ) : (
                     <span className="grid h-full place-items-center">
                       {categoryFallbackIcon(category.slug)}

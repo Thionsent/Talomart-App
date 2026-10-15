@@ -2,11 +2,13 @@
 
 import { Heart, ShoppingBag } from "lucide-react";
 import Link from "next/link";
+import Image from "next/image";
 
 import type { CatalogueProduct } from "@/lib/catalog-queries";
 import { isUuidCartProductId } from "@/lib/cart-product-id";
 import { useWishlist } from "@/components/wishlist/wishlist-provider";
 import { productCardSpecifications } from "@/lib/product-card-specifications";
+import { canOptimizeStoreImage } from "@/lib/storefront-image";
 
 const formatPrice = (value: number) =>
   new Intl.NumberFormat("en-KE").format(value);
@@ -27,12 +29,19 @@ export function ProductCard({ product }: { product: CatalogueProduct }) {
               -{product.discount}%
             </span>
           )}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={product.image}
-            alt={product.name}
-            className="h-full w-full object-cover transition duration-500 group-hover:brightness-95"
-          />
+          {product.image ? (
+            <Image
+              src={product.image}
+              alt={product.name}
+              fill
+              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 33vw, 25vw"
+              loading="lazy"
+              unoptimized={!canOptimizeStoreImage(product.image)}
+              className="object-cover transition duration-500 group-hover:brightness-95"
+            />
+          ) : (
+            <ShoppingBag aria-hidden="true" className="m-auto h-12 w-12 text-slate-300" />
+          )}
         </div>
       </Link>
       <div className="space-y-3 p-4">

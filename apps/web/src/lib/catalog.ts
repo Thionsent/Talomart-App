@@ -35,19 +35,23 @@ export interface StoreCategory {
  * takes precedence, so these only make an unconfigured category look complete.
  */
 export const defaultCategoryImages: Record<string, string> = {
-  phones: "/images/categories/phones.png",
-  audio: "/images/categories/audio.png",
-  charging: "/images/categories/charging.png",
-  storage: "/images/categories/storage.png",
-  cameras: "/images/categories/cameras.png",
-  accessories: "/images/categories/accessories.png"
+  phones: "/images/categories/phones.webp",
+  audio: "/images/categories/audio.webp",
+  charging: "/images/categories/charging.webp",
+  storage: "/images/categories/storage.webp",
+  cameras: "/images/categories/cameras.webp",
+  accessories: "/images/categories/accessories.webp"
 };
 
 export function resolveCategoryImageUrl(
   slug: string,
   imageUrl?: string | null
 ) {
-  return imageUrl || defaultCategoryImages[slug.toLowerCase()] || null;
+  const fallback = defaultCategoryImages[slug.toLowerCase()] || null;
+  // Preserve admin choices while upgrading any saved references to our old PNG defaults.
+  return imageUrl === fallback?.replace(/\.webp$/, ".png")
+    ? fallback
+    : imageUrl || fallback;
 }
 
 export const storefrontCategories: StoreCategory[] = [

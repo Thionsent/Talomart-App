@@ -1,10 +1,12 @@
 import { CheckCircle2, ShieldCheck, Truck } from "lucide-react";
+import Image from "next/image";
 import { notFound } from "next/navigation";
 
 import { ProductActions } from "@/components/catalog/product-actions";
 import { ProductGrid } from "@/components/catalog/product-grid";
 import { getProductBySlug, getProducts } from "@/lib/catalog-queries";
 import { absoluteUrl, isPlaceholderCatalogueImage, privatePageRobots, publicPageMetadata, safeJsonLd, siteUrl } from "@/lib/seo";
+import { canOptimizeStoreImage } from "@/lib/storefront-image";
 
 const formatPrice = (value: number) =>
   new Intl.NumberFormat("en-KE").format(value);
@@ -69,12 +71,16 @@ export default async function ProductPage({ params }: ProductPageProps) {
       />
       <div className="page-shell">
         <div className="grid gap-8 rounded-3xl bg-white p-5 shadow-sm lg:grid-cols-[1.05fr_0.95fr] lg:p-8">
-          <div className="overflow-hidden rounded-3xl bg-slate-100">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+          <div className="relative aspect-[4/3] overflow-hidden rounded-3xl bg-slate-100">
+            <Image
               src={product.image}
               alt={product.name}
-              className="aspect-[4/3] h-full w-full object-contain"
+              fill
+              sizes="(max-width: 1024px) 100vw, 50vw"
+              loading="eager"
+              fetchPriority="high"
+              unoptimized={!canOptimizeStoreImage(product.image)}
+              className="object-contain"
             />
           </div>
 

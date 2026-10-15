@@ -29,8 +29,8 @@ export const metadata: Metadata = {
     "Shop phones, audio, charging, storage and smart accessories at Talomart Stores in Kenya. Browse the latest products and get support from our team in Sirari, Migori.",
   robots: isIndexableDeployment ? undefined : { index: false, follow: false },
   icons: {
-    icon: "/talomart-logo.png",
-    apple: "/talomart-logo.png"
+    icon: "/talomart-favicon.png",
+    apple: "/talomart-apple-icon.png"
   },
   openGraph: {
     title: "Talomart Stores",

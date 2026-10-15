@@ -22,6 +22,20 @@ export type HomepageBanner = {
   endsAt: string | null;
 };
 
+/** Existing CMS campaigns still point at PNGs; use their smaller display copies. */
+const optimizedBuiltInBanners = new Set([
+  "talomart-everyday-tech",
+  "talomart-power-essentials",
+  "talomart-audio-creator"
+]);
+
+export function storefrontBannerImageUrl(url: string): string {
+  const match = /^\/images\/homepage\/(talomart-[a-z-]+?)(-mobile)?\.png$/.exec(url);
+  return match?.[1] && optimizedBuiltInBanners.has(match[1])
+    ? `${url.slice(0, -4)}.webp`
+    : url;
+}
+
 export function isHomepageBannerVisible(
   banner: HomepageBanner,
   now = new Date()

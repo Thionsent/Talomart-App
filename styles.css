@@ -32,7 +32,7 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 .site-header { background: white; position: relative; z-index: 20; box-shadow: 0 2px 12px rgba(7,27,66,.04); }
 .header-main { min-height: 86px; display: flex; align-items: center; gap: clamp(18px, 2.4vw, 34px); }
 .brand { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
-.brand-mark { width: 41px; height: 41px; border-radius: 10px 10px 16px 16px; position: relative; transform: none; display: block; overflow: hidden; background: #071b42 url('/talomart-icon.png') center / cover no-repeat; }
+.brand-mark { width: 41px; height: 41px; border-radius: 10px 10px 16px 16px; position: relative; transform: none; display: block; overflow: hidden; background: #071b42 url('/talomart-icon.webp') center / cover no-repeat; }
 .brand-mark:before, .brand-mark span { display: none; }
 .brand-name { font: 800 24px/21px "Manrope", sans-serif; letter-spacing: -1.2px; }
 .brand-name > span { color: var(--green); }

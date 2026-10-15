@@ -12,7 +12,7 @@ export function SiteFooter() {
             aria-label="Talomart Stores home"
           >
             <Image
-              src="/talomart-logo.png"
+              src="/talomart-logo-256.webp"
               alt="Talomart Stores"
               width={112}
               height={112}

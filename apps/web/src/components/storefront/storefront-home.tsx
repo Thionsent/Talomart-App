@@ -16,6 +16,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 
 import {
   addProductToLocalCart,
@@ -39,40 +40,37 @@ import {
   type HomepageSection,
   type HomepageSectionSlot
 } from "@/lib/homepage-content";
-import type { HomepageBanner } from "@/lib/homepage-banner";
+import {
+  storefrontBannerImageUrl,
+  type HomepageBanner
+} from "@/lib/homepage-banner";
 import { HomepageBannerCarousel } from "@/components/storefront/homepage-banner-carousel";
 import { productCardSpecifications } from "@/lib/product-card-specifications";
+import { canOptimizeStoreImage } from "@/lib/storefront-image";
 
 const formatPrice = (value: number) =>
   new Intl.NumberFormat("en-KE").format(value);
 
 function CategoryArtwork({ category }: { category: StoreCategory }) {
   const fallback = defaultCategoryImages[category.slug.toLowerCase()] ?? null;
-  const [loadedSource, setLoadedSource] = useState<string | null>(null);
-  const source = category.imageUrl && category.imageUrl === loadedSource
-    ? loadedSource
-    : fallback;
-
-  useEffect(() => {
-    const requested = category.imageUrl;
-    if (!requested || requested === fallback) return;
-
-    let cancelled = false;
-    const image = new window.Image();
-    image.onload = () => { if (!cancelled) setLoadedSource(requested); };
-    image.onerror = () => { if (!cancelled) setLoadedSource(null); };
-    image.src = requested;
-    return () => { cancelled = true; };
-  }, [category.imageUrl, fallback]);
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  const requested = category.imageUrl?.trim() || null;
+  const source = requested && requested !== failedSource
+    ? requested
+    : fallback && fallback !== failedSource
+      ? fallback
+      : null;
 
   return (
     <span className={`category-art${source ? " has-image" : ""}`}>
       <span className="emoji-art" aria-hidden="true">{category.art}</span>
-      {source && (
-        // The category name beside this image is its accessible label.
+      {source && source === fallback ? (
+        // The bundled artwork is already a tiny, correctly sized WebP.
         // eslint-disable-next-line @next/next/no-img-element
-        <img className="category-image" src={source} alt="" />
-      )}
+        <img className="category-image" src={source} alt="" width={160} height={160} loading="lazy" decoding="async" onError={() => setFailedSource(source)} />
+      ) : source ? (
+        <Image className="category-image" src={source} alt="" fill sizes="68px" loading="lazy" unoptimized={!canOptimizeStoreImage(source)} onError={() => setFailedSource(source)} />
+      ) : null}
     </span>
   );
 }
@@ -213,8 +211,14 @@ export function StorefrontHome({
           aria-label={`View ${product.name}`}
         >
           {product.image ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={product.image} alt={product.name} />
+            <Image
+              src={product.image}
+              alt={product.name}
+              fill
+              sizes="(max-width: 580px) 50vw, (max-width: 820px) 33vw, (max-width: 1080px) 25vw, 20vw"
+              loading="lazy"
+              unoptimized={!canOptimizeStoreImage(product.image)}
+            />
           ) : (
             <ShoppingBag aria-hidden="true" />
           )}
@@ -322,7 +326,7 @@ export function StorefrontHome({
               <div className="hero-glow" />
               {hero.imageUrl && isHomepageSectionVisible(hero) && (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={hero.imageUrl} alt={hero.title} />
+                <img src={storefrontBannerImageUrl(hero.imageUrl)} alt={hero.title} loading="lazy" decoding="async" />
               )}
             </div>
           </article>
@@ -343,7 +347,7 @@ export function StorefrontHome({
               )}
               {audioPromo.imageUrl && isHomepageSectionVisible(audioPromo) && (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={audioPromo.imageUrl} alt={audioPromo.title} />
+                <img src={storefrontBannerImageUrl(audioPromo.imageUrl)} alt={audioPromo.title} loading="lazy" decoding="async" />
               )}
             </article>
             <article className="mini-banner power-banner">

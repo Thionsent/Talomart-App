@@ -4,7 +4,10 @@ import { ArrowRight, ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
-import type { HomepageBanner } from "@/lib/homepage-banner";
+import {
+  storefrontBannerImageUrl,
+  type HomepageBanner
+} from "@/lib/homepage-banner";
 
 export function HomepageBannerCarousel({ banners }: { banners: HomepageBanner[] }) {
   const [activeIndex, setActiveIndex] = useState(0);
@@ -15,12 +18,35 @@ export function HomepageBannerCarousel({ banners }: { banners: HomepageBanner[] 
     if (banners.length < 2 || paused) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
-    const timer = window.setInterval(() => {
-      setActiveIndex((current) => (current + 1) % banners.length);
-    }, 2500);
+    const nextIndex = (activeIndex + 1) % banners.length;
+    const nextBanner = banners[nextIndex];
+    if (!nextBanner) return;
+    const mobile = window.matchMedia("(max-width: 720px)").matches;
+    const source = storefrontBannerImageUrl(
+      mobile && nextBanner.mobileImageUrl
+        ? nextBanner.mobileImageUrl
+        : nextBanner.imageUrl
+    );
+    const nextImage = new window.Image();
+    let timer: number | undefined;
 
-    return () => window.clearInterval(timer);
-  }, [banners.length, paused]);
+    const scheduleNextSlide = () => {
+      if (timer !== undefined) return;
+      timer = window.setTimeout(() => {
+        setActiveIndex((current) => current === activeIndex ? nextIndex : current);
+      }, 2500);
+    };
+
+    // Keep the current slide visible until the next poster is ready to paint.
+    nextImage.onload = scheduleNextSlide;
+    nextImage.src = source;
+    if (nextImage.complete && nextImage.naturalWidth > 0) scheduleNextSlide();
+
+    return () => {
+      nextImage.onload = null;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [activeIndex, banners, paused]);
 
   if (!banners.length) return null;
 
@@ -76,11 +102,13 @@ export function HomepageBannerCarousel({ banners }: { banners: HomepageBanner[] 
             >
               <picture>
                 {banner.mobileImageUrl && (
-                  <source media="(max-width: 720px)" srcSet={banner.mobileImageUrl} />
+                  <source media="(max-width: 720px)" srcSet={storefrontBannerImageUrl(banner.mobileImageUrl)} />
                 )}
                 <img
-                  src={banner.imageUrl}
+                  src={storefrontBannerImageUrl(banner.imageUrl)}
                   alt={banner.altText}
+                  width={1600}
+                  height={900}
                   style={{ objectPosition: `${banner.focalPointX}% ${banner.focalPointY}%` }}
                   loading={index === 0 ? "eager" : "lazy"}
                   fetchPriority={index === 0 ? "high" : "auto"}

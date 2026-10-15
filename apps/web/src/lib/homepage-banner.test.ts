@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { isHomepageBannerVisible, type HomepageBanner } from "./homepage-banner";
+import {
+  isHomepageBannerVisible,
+  storefrontBannerImageUrl,
+  type HomepageBanner
+} from "./homepage-banner";
 
 const banner: HomepageBanner = {
   id: "14d5c444-e8f3-40e2-a908-a14635f4701f",
@@ -23,6 +27,15 @@ const banner: HomepageBanner = {
 };
 
 describe("homepage banners", () => {
+  it("uses compact artwork for built-in desktop and mobile campaigns", () => {
+    expect(storefrontBannerImageUrl("/images/homepage/talomart-everyday-tech.png"))
+      .toBe("/images/homepage/talomart-everyday-tech.webp");
+    expect(storefrontBannerImageUrl("/images/homepage/talomart-audio-creator-mobile.png"))
+      .toBe("/images/homepage/talomart-audio-creator-mobile.webp");
+    expect(storefrontBannerImageUrl("/images/homepage/custom-upload.png"))
+      .toBe("/images/homepage/custom-upload.png");
+  });
+
   it("shows an active banner inside its publication window", () => {
     expect(isHomepageBannerVisible(banner)).toBe(true);
     expect(
