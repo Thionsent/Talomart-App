@@ -14,6 +14,7 @@ const deploymentEnvironment = {
     "sb_secret_staging_key_with_more_than_twenty_characters",
   SUPABASE_STORAGE_BUCKET: "staging-product-images",
   MPESA_ENVIRONMENT: "sandbox",
+  MPESA_TRANSACTION_TYPE: "CustomerPayBillOnline",
   MPESA_CONSUMER_KEY: "sandbox-consumer-key-value",
   MPESA_CONSUMER_SECRET: "sandbox-consumer-secret-value",
   MPESA_SHORTCODE: "174379",
@@ -65,6 +66,30 @@ describe("server environment validation", () => {
         ADMIN_MFA_REQUIRED: "false"
       })
     ).toThrow(/MPESA_ENVIRONMENT=production|MFA cannot be disabled/);
+  });
+
+  it("requires an explicit Till transaction type and first-party callback in production", () => {
+    const production: Record<string, string | undefined> = {
+      ...deploymentEnvironment,
+      APP_ENV: "production",
+      MPESA_ENVIRONMENT: "production",
+      MPESA_CALLBACK_URL: "https://staging.talomart.co.ke/api/payments/notify"
+    };
+    delete production.MPESA_TRANSACTION_TYPE;
+    expect(() => validateServerEnvironment(production)).toThrow(/MPESA_TRANSACTION_TYPE is required/);
+    expect(validateServerEnvironment({
+      ...production,
+      MPESA_TRANSACTION_TYPE: "CustomerBuyGoodsOnline"
+    }).MPESA_TRANSACTION_TYPE).toBe("CustomerBuyGoodsOnline");
+    expect(() => validateServerEnvironment({
+      ...production,
+      MPESA_TRANSACTION_TYPE: "CustomerPayBillOnline"
+    })).toThrow(/production Till requires/);
+    expect(() => validateServerEnvironment({
+      ...production,
+      MPESA_TRANSACTION_TYPE: "CustomerBuyGoodsOnline",
+      MPESA_CALLBACK_URL: "https://other.example.net/api/payments/notify"
+    })).toThrow(/must be the app's/);
   });
 
   it("keeps safe defaults available for local development", () => {

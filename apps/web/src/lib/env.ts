@@ -38,6 +38,10 @@ const serverEnvSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: optionalSecret,
   SUPABASE_STORAGE_BUCKET: z.string().min(1).default("product-images"),
   MPESA_ENVIRONMENT: z.enum(["sandbox", "production"]).default("sandbox"),
+  MPESA_LIVE_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
+  MPESA_TRANSACTION_TYPE: z
+    .enum(["CustomerPayBillOnline", "CustomerBuyGoodsOnline"])
+    .default("CustomerPayBillOnline"),
   MPESA_CONSUMER_KEY: z.string().default(""),
   MPESA_CONSUMER_SECRET: z.string().default(""),
   MPESA_SHORTCODE: z.string().default(""),
@@ -167,6 +171,29 @@ function productionValidationIssues(source: RawEnvironment) {
     if (isLocalHostname(source.MPESA_CALLBACK_URL)) {
       issues.push("MPESA_CALLBACK_URL cannot use a local hostname.");
     }
+    if (source.MPESA_ENVIRONMENT === "production") {
+      try {
+        const callback = new URL(source.MPESA_CALLBACK_URL);
+        const app = new URL(source.NEXT_PUBLIC_APP_URL ?? "");
+        if (callback.origin !== app.origin || callback.pathname !== "/api/payments/notify" || callback.search || callback.hash) {
+          issues.push("Production MPESA_CALLBACK_URL must be the app's /api/payments/notify endpoint without query parameters.");
+        }
+      } catch {
+        issues.push("Production MPESA_CALLBACK_URL must be a valid public app URL.");
+      }
+    }
+  }
+
+  if (source.MPESA_ENVIRONMENT === "production" && !source.MPESA_TRANSACTION_TYPE) {
+    issues.push("MPESA_TRANSACTION_TYPE is required for live M-Pesa.");
+  }
+
+  if (
+    source.APP_ENV === "production" &&
+    source.MPESA_TRANSACTION_TYPE &&
+    source.MPESA_TRANSACTION_TYPE !== "CustomerBuyGoodsOnline"
+  ) {
+    issues.push("Talomart's production Till requires MPESA_TRANSACTION_TYPE=CustomerBuyGoodsOnline.");
   }
 
   if ((source.AUTH_SECRET?.length ?? 0) < 48) {

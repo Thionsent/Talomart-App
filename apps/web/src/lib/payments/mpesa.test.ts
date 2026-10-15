@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildStkPushRequest,
   classifyMpesaStkQueryResponse,
+  formatDarajaTimestamp,
   getMpesaConfigurationStatus,
   normalizeMpesaPhone
 } from "./mpesa";
 
 const completeSandboxConfiguration = {
   MPESA_ENVIRONMENT: "sandbox" as const,
+  MPESA_TRANSACTION_TYPE: "CustomerPayBillOnline" as const,
   MPESA_CONSUMER_KEY: "sandbox-consumer-key",
   MPESA_CONSUMER_SECRET: "sandbox-consumer-secret",
   MPESA_SHORTCODE: "sandbox-shortcode",
@@ -45,6 +48,95 @@ describe("M-Pesa configuration", () => {
     expect(result.reason).toContain("consumer key");
     expect(result.reason).toContain("passkey");
   });
+
+  it("accepts a production Till with the neutral callback route", () => {
+    expect(getMpesaConfigurationStatus({
+      ...completeSandboxConfiguration,
+      MPESA_ENVIRONMENT: "production",
+      MPESA_LIVE_ENABLED: true,
+      MPESA_TRANSACTION_TYPE: "CustomerBuyGoodsOnline",
+      MPESA_CALLBACK_URL: "https://shop.example.com/api/payments/notify"
+    }).configured).toBe(true);
+  });
+
+  it("rejects the legacy callback path in production", () => {
+    const status = getMpesaConfigurationStatus({
+      ...completeSandboxConfiguration,
+      MPESA_ENVIRONMENT: "production",
+      MPESA_LIVE_ENABLED: true,
+      MPESA_TRANSACTION_TYPE: "CustomerBuyGoodsOnline"
+    });
+    expect(status.configured).toBe(false);
+    expect(status.reason).toContain("/api/payments/notify");
+  });
+
+  it("rejects PayBill requests for Talomart's production Till", () => {
+    const status = getMpesaConfigurationStatus({
+      ...completeSandboxConfiguration,
+      MPESA_ENVIRONMENT: "production",
+      MPESA_LIVE_ENABLED: true,
+      MPESA_CALLBACK_URL: "https://shop.example.com/api/payments/notify"
+    });
+    expect(status.configured).toBe(false);
+    expect(status.reason).toContain("Buy Goods");
+  });
+
+  it("rejects a callback to a different host than the live app", () => {
+    const status = getMpesaConfigurationStatus({
+      ...completeSandboxConfiguration,
+      NEXT_PUBLIC_APP_URL: "https://shop.example.com",
+      MPESA_ENVIRONMENT: "production",
+      MPESA_LIVE_ENABLED: true,
+      MPESA_TRANSACTION_TYPE: "CustomerBuyGoodsOnline",
+      MPESA_CALLBACK_URL: "https://other.example.com/api/payments/notify"
+    });
+    expect(status.configured).toBe(false);
+    expect(status.reason).toContain("public origin");
+  });
+
+  it("keeps live STK requests disabled by default even with credentials present", () => {
+    const configuration = {
+      ...completeSandboxConfiguration,
+      MPESA_ENVIRONMENT: "production",
+      MPESA_TRANSACTION_TYPE: "CustomerBuyGoodsOnline",
+      MPESA_CALLBACK_URL: "https://shop.example.com/api/payments/notify"
+    } as const;
+    const status = getMpesaConfigurationStatus(configuration);
+    expect(status.configured).toBe(false);
+    expect(status.reason).toContain("disabled");
+    expect(getMpesaConfigurationStatus(configuration, { allowDisabledLive: true }).configured).toBe(true);
+  });
+});
+
+describe("Daraja timestamp", () => {
+  it("formats UTC time using the Nairobi business clock", () => {
+    expect(formatDarajaTimestamp(new Date("2026-10-14T21:05:07.000Z"))).toBe("20261015000507");
+  });
+});
+
+describe("live Till STK request", () => {
+  it("sends Buy Goods to the approved Till and neutral callback", () => {
+    const payload = buildStkPushRequest(
+      { phone: "0712 345 678", amountKes: 250, orderNumber: "TLM-1001" },
+      {
+        ...completeSandboxConfiguration,
+        MPESA_ENVIRONMENT: "production",
+        MPESA_TRANSACTION_TYPE: "CustomerBuyGoodsOnline",
+        MPESA_SHORTCODE: "123456",
+        MPESA_CALLBACK_URL: "https://shop.example.com/api/payments/notify"
+      },
+      "20261014120000"
+    );
+    expect(payload).toMatchObject({
+      TransactionType: "CustomerBuyGoodsOnline",
+      BusinessShortCode: "123456",
+      PartyB: "123456",
+      PartyA: "254712345678",
+      PhoneNumber: "254712345678",
+      Amount: 250,
+      CallBackURL: "https://shop.example.com/api/payments/notify"
+    });
+  });
 });
 
 describe("M-Pesa STK query classification", () => {
@@ -56,6 +148,10 @@ describe("M-Pesa STK query classification", () => {
         ResultDesc: "The service request is processed successfully."
       }).status
     ).toBe("paid");
+  });
+
+  it("does not trust a successful-looking result in a failed HTTP response", () => {
+    expect(classifyMpesaStkQueryResponse(500, { ResultCode: 0 }).status).toBe("unavailable");
   });
 
   it("recognizes terminal customer cancellation", () => {

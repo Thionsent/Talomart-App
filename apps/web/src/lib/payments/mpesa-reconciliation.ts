@@ -15,6 +15,13 @@ export type MpesaStkCallback = {
     | undefined;
 };
 
+export function isVerifiedMpesaCallbackResult(
+  callbackResultCode: number,
+  providerStatus: "paid" | "failed" | "processing" | "not_found" | "unavailable"
+) {
+  return providerStatus === (callbackResultCode === 0 ? "paid" : "failed");
+}
+
 export function mpesaCallbackMetadataValue(
   callback: MpesaStkCallback,
   name: string

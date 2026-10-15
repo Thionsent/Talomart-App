@@ -4,7 +4,7 @@ import { env } from "../env";
 
 const tokenResponseSchema = z.object({
   access_token: z.string(),
-  expires_in: z.string()
+  expires_in: z.union([z.string(), z.number()])
 });
 
 const stkResponseSchema = z.object({
@@ -16,7 +16,10 @@ const stkResponseSchema = z.object({
 });
 
 type MpesaConfiguration = {
+  NEXT_PUBLIC_APP_URL?: string;
   MPESA_ENVIRONMENT: "sandbox" | "production";
+  MPESA_LIVE_ENABLED?: boolean;
+  MPESA_TRANSACTION_TYPE: "CustomerPayBillOnline" | "CustomerBuyGoodsOnline";
   MPESA_CONSUMER_KEY: string;
   MPESA_CONSUMER_SECRET: string;
   MPESA_SHORTCODE: string;
@@ -36,9 +39,19 @@ function baseUrl() {
     : "https://sandbox.safaricom.co.ke";
 }
 
-function timestamp(date = new Date()) {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+export function formatDarajaTimestamp(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Nairobi",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+  const value = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("year")}${value("month")}${value("day")}${value("hour")}${value("minute")}${value("second")}`;
 }
 
 function normalizePhone(phone: string) {
@@ -64,6 +77,7 @@ async function getAccessToken() {
     `${baseUrl()}/oauth/v1/generate?grant_type=client_credentials`,
     {
       headers: { Authorization: `Basic ${credentials}` },
+      signal: AbortSignal.timeout(10_000),
       cache: "no-store"
     }
   );
@@ -75,6 +89,29 @@ export interface StkPushInput {
   phone: string;
   amountKes: number;
   orderNumber: string;
+}
+
+export function buildStkPushRequest(
+  input: StkPushInput,
+  configuration: MpesaConfiguration,
+  requestTimestamp: string
+) {
+  const phone = normalizePhone(input.phone);
+  return {
+    BusinessShortCode: configuration.MPESA_SHORTCODE,
+    Password: Buffer.from(
+      `${configuration.MPESA_SHORTCODE}${configuration.MPESA_PASSKEY}${requestTimestamp}`
+    ).toString("base64"),
+    Timestamp: requestTimestamp,
+    TransactionType: configuration.MPESA_TRANSACTION_TYPE,
+    Amount: input.amountKes,
+    PartyA: phone,
+    PartyB: configuration.MPESA_SHORTCODE,
+    PhoneNumber: phone,
+    CallBackURL: configuration.MPESA_CALLBACK_URL,
+    AccountReference: input.orderNumber,
+    TransactionDesc: `Talomart order ${input.orderNumber}`
+  };
 }
 
 export type MpesaStkQueryStatus =
@@ -116,7 +153,7 @@ export function classifyMpesaStkQueryResponse(
   const normalizedDescription = description.toLowerCase();
   const errorCode = String(record.errorCode ?? "");
 
-  if (Number.isFinite(resultCode) && resultCode === 0) {
+  if (httpStatus >= 200 && httpStatus < 300 && Number.isFinite(resultCode) && resultCode === 0) {
     return {
       status: "paid",
       resultCode,
@@ -168,9 +205,17 @@ export function classifyMpesaStkQueryResponse(
 }
 
 export function getMpesaConfigurationStatus(
-  configuration: MpesaConfiguration = env
+  configuration: MpesaConfiguration = env,
+  options: { allowDisabledLive?: boolean } = {}
 ): MpesaConfigurationStatus {
   const environment = configuration.MPESA_ENVIRONMENT;
+  if (environment === "production" && configuration.MPESA_LIVE_ENABLED !== true && !options.allowDisabledLive) {
+    return {
+      environment,
+      configured: false,
+      reason: "Live M-Pesa payments are disabled until production verification is complete."
+    };
+  }
   const missing = [
     ["consumer key", configuration.MPESA_CONSUMER_KEY],
     ["consumer secret", configuration.MPESA_CONSUMER_SECRET],
@@ -207,6 +252,41 @@ export function getMpesaConfigurationStatus(
     };
   }
 
+  if (
+    environment === "production" &&
+    configuration.MPESA_TRANSACTION_TYPE !== "CustomerBuyGoodsOnline"
+  ) {
+    return {
+      environment,
+      configured: false,
+      reason: "Talomart's production Till requires Buy Goods transactions."
+    };
+  }
+
+  if (
+    environment === "production" &&
+    (callbackUrl.pathname !== "/api/payments/notify" ||
+      callbackUrl.search || callbackUrl.hash)
+  ) {
+    return {
+      environment,
+      configured: false,
+      reason: "Production M-Pesa callback must use /api/payments/notify without query parameters."
+    };
+  }
+
+  if (
+    environment === "production" &&
+    configuration.NEXT_PUBLIC_APP_URL &&
+    callbackUrl.origin !== new URL(configuration.NEXT_PUBLIC_APP_URL).origin
+  ) {
+    return {
+      environment,
+      configured: false,
+      reason: "The production M-Pesa callback must use this app's public origin."
+    };
+  }
+
   return { environment, configured: true, reason: null };
 }
 
@@ -227,10 +307,7 @@ export async function initiateStkPush(input: StkPushInput) {
     throw new Error("M-Pesa amount must be a whole number of at least KSh 1.");
   }
 
-  const requestTimestamp = timestamp();
-  const password = Buffer.from(
-    `${env.MPESA_SHORTCODE}${env.MPESA_PASSKEY}${requestTimestamp}`
-  ).toString("base64");
+  const requestTimestamp = formatDarajaTimestamp();
   const token = await getAccessToken();
 
   const response = await fetch(
@@ -241,20 +318,9 @@ export async function initiateStkPush(input: StkPushInput) {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        BusinessShortCode: env.MPESA_SHORTCODE,
-        Password: password,
-        Timestamp: requestTimestamp,
-        TransactionType: "CustomerPayBillOnline",
-        Amount: Math.round(input.amountKes),
-        PartyA: normalizePhone(input.phone),
-        PartyB: env.MPESA_SHORTCODE,
-        PhoneNumber: normalizePhone(input.phone),
-        CallBackURL: env.MPESA_CALLBACK_URL,
-        AccountReference: input.orderNumber,
-        TransactionDesc: `Talomart order ${input.orderNumber}`
-      }),
-      cache: "no-store"
+      body: JSON.stringify(buildStkPushRequest(input, env, requestTimestamp)),
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000)
     }
   );
 
@@ -271,11 +337,13 @@ export async function initiateStkPush(input: StkPushInput) {
 export async function queryStkPush(
   checkoutRequestId: string
 ): Promise<MpesaStkQueryResult> {
-  if (!isMpesaConfigured()) {
+  // A live-payment kill switch must stop new charges, not reconciliation of
+  // requests that were already accepted by Daraja.
+  if (!getMpesaConfigurationStatus(env, { allowDisabledLive: true }).configured) {
     throw new Error("M-Pesa is not configured yet.");
   }
 
-  const requestTimestamp = timestamp();
+  const requestTimestamp = formatDarajaTimestamp();
   const password = Buffer.from(
     `${env.MPESA_SHORTCODE}${env.MPESA_PASSKEY}${requestTimestamp}`
   ).toString("base64");
@@ -292,7 +360,8 @@ export async function queryStkPush(
       Timestamp: requestTimestamp,
       CheckoutRequestID: checkoutRequestId
     }),
-    cache: "no-store"
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000)
   });
   const payload = await response.json().catch(() => null);
 

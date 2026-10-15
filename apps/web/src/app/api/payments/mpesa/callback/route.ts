@@ -10,14 +10,17 @@ import {
   enforceEndpointRateLimit
 } from "@/lib/endpoint-rate-limit";
 import { logger } from "@/lib/logger";
+import { env } from "@/lib/env";
 import type { OrderStatus } from "@/lib/order-status";
 import { recordOrderStatusTransition } from "@/lib/order-status-history";
 import {
   getMpesaFallbackMatch,
   hasUnambiguousMpesaCandidate,
+  isVerifiedMpesaCallbackResult,
   mpesaCallbackMetadataValue,
   type MpesaStkCallback
 } from "@/lib/payments/mpesa-reconciliation";
+import { queryStkPush } from "@/lib/payments/mpesa";
 import { sql } from "@talomart/db";
 import { after } from "next/server";
 
@@ -51,6 +54,12 @@ type PaymentRecord = {
 };
 
 export async function POST(request: Request) {
+  // Only the configured endpoint may accept callbacks. The old sandbox route
+  // must not remain a second, unadvertised production payment endpoint.
+  if (new URL(request.url).pathname !== new URL(env.MPESA_CALLBACK_URL).pathname) {
+    return new Response(null, { status: 404 });
+  }
+
   after(() => processPendingTransactionalEmails());
   const rateLimitResponse = await enforceEndpointRateLimit(
     request,
@@ -69,6 +78,36 @@ export async function POST(request: Request) {
   }
 
   const callback: MpesaStkCallback = result.data.Body.stkCallback;
+  if (env.MPESA_ENVIRONMENT === "production") {
+    // Daraja does not sign STK callbacks. Confirm the provider's final state
+    // before a public HTTP request is allowed to change an order's payment.
+    let providerStatus;
+    try {
+      providerStatus = await queryStkPush(callback.CheckoutRequestID);
+    } catch (error) {
+      logger.warn({ error }, "Could not verify production M-Pesa callback");
+      return Response.json(
+        { ResultCode: 1, ResultDesc: "Verification pending" },
+        { status: 503 }
+      );
+    }
+
+    if (!isVerifiedMpesaCallbackResult(callback.ResultCode, providerStatus.status)) {
+      logger.warn(
+        {
+          checkoutRequestId: callback.CheckoutRequestID,
+          callbackResultCode: callback.ResultCode,
+          providerStatus: providerStatus.status
+        },
+        "Production M-Pesa callback disagreed with provider status"
+      );
+      return Response.json(
+        { ResultCode: 1, ResultDesc: "Verification pending" },
+        { status: 503 }
+      );
+    }
+  }
+
   const receipt = mpesaCallbackMetadataValue(
     callback,
     "MpesaReceiptNumber"
@@ -92,7 +131,7 @@ export async function POST(request: Request) {
 
     if (!payment) {
       const fallback = getMpesaFallbackMatch(callback);
-      if (fallback) {
+      if (fallback && env.MPESA_ENVIRONMENT === "sandbox") {
         const candidates = await transaction<PaymentRecord[]>`
           select
             p.id::text,

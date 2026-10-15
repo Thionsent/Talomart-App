@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   getMpesaFallbackMatch,
   hasUnambiguousMpesaCandidate,
+  isVerifiedMpesaCallbackResult,
   mpesaCallbackMetadataValue,
   retryMpesaPersistence,
   type MpesaStkCallback
@@ -43,6 +44,14 @@ describe("M-Pesa callback reconciliation", () => {
     expect(hasUnambiguousMpesaCandidate([{ id: "one" }])).toEqual({ id: "one" });
     expect(hasUnambiguousMpesaCandidate([])).toBeNull();
     expect(hasUnambiguousMpesaCandidate([{ id: "one" }, { id: "two" }])).toBeNull();
+  });
+
+  it("requires a provider-confirmed final state before trusting a live callback", () => {
+    expect(isVerifiedMpesaCallbackResult(0, "paid")).toBe(true);
+    expect(isVerifiedMpesaCallbackResult(1032, "failed")).toBe(true);
+    expect(isVerifiedMpesaCallbackResult(0, "processing")).toBe(false);
+    expect(isVerifiedMpesaCallbackResult(0, "unavailable")).toBe(false);
+    expect(isVerifiedMpesaCallbackResult(1032, "paid")).toBe(false);
   });
 
   it("retries a transient persistence failure", async () => {
